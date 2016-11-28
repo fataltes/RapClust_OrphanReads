@@ -1,10 +1,12 @@
 from __future__ import print_function
+import time
 
-def buildNetFile(sampdirs, netfile, cutoff, writecomponents=False):
+def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, writecomponents=False):
     import itertools
     import pandas as pd
     import numpy as np
     import os
+    import logging
 
     sep = os.path.sep
     sffiles = [sep.join([sd, 'quant.sf']) for sd in sampdirs]
@@ -24,7 +26,7 @@ def buildNetFile(sampdirs, netfile, cutoff, writecomponents=False):
     diagCounts = np.zeros(len(quant['TPM'].values))
 
     tot = 0
-    eqfiles = [sep.join([sd, 'aux/eq_classes.txt']) for sd in sampdirs]
+    eqfiles = [sep.join([sd, 'aux_info/eq_classes.txt']) for sd in sampdirs]
 
     firstSamp = True
     numSamp = 0
@@ -55,9 +57,20 @@ def buildNetFile(sampdirs, netfile, cutoff, writecomponents=False):
             firstSamp = False
 
     tpm = quant.loc[tnames, 'TPM'].values / numSamp
+
+    # tottpm is just a aggregated tpm over all samples. Here it is average.
+    #tpmlen = int(len(tpm)/numSamp)
+    #tottpm = [0] * tpmlen
+    tottpm = tpm
+    #for i in xrange(numSamp):
+    #    tottpm += tpm[i*tpmlen:(i+1)*tpmlen]
+
     estCount = quant.loc[tnames, 'NumReads'].values
     efflens = quant.loc[tnames, 'EffectiveLength'].values
+    lens = quant.loc[tnames, 'Length'].values
     epsilon =  np.finfo(float).eps
+
+
     for tids, count in eqClasses.iteritems():
         denom = sum([tpm[t] for t in tids])
         tot += count
@@ -93,6 +106,72 @@ def buildNetFile(sampdirs, netfile, cutoff, writecomponents=False):
 
     for e in edgesToRemove:
         del weightDict[e]
+
+    # Considering Orphan reads
+    CNT_IDX =0; READ_DIST_IDX=1; TPM_RATIO_IDX=2
+    orphan_pair = consider_orphan_reads(tnames, tpm, lens, sampdirs, orphanLink_out_file, read_file=False)
+
+
+    import sys
+    cnt_min = sys.maxsize
+    cnt_max = 0
+    dist_min = sys.maxsize
+    dist_max = 0
+    tpm_min = 1
+    tpm_max = 0
+    for k, val in orphan_pair.iteritems():
+        cnt_min = min(val[CNT_IDX], cnt_min)
+        cnt_max = max(val[CNT_IDX], cnt_max)
+        dist_min = min(val[READ_DIST_IDX], dist_min)
+        dist_max = max(val[READ_DIST_IDX], dist_max)
+        tpm_min = min(val[TPM_RATIO_IDX], tpm_min)
+        tpm_max = max(val[TPM_RATIO_IDX], tpm_max)
+
+    print("count: Min = {}, Max = {}".format(cnt_min, cnt_max))
+    print("read dist: Min = {}, Max = {}".format(dist_min, dist_max))
+    print("tpm: Min = {}, Max = {}".format(tpm_min, tpm_max))
+    #points_cnt = len(cnt.keys())
+
+    increased = 0
+    added = 0
+    min_score = 1
+    max_score = 0
+    score_cnt = 0
+    score_sum = 0
+    score_squared_sum = 0
+    for k, val in orphan_pair.iteritems():
+        vals = [(val[CNT_IDX] - cnt_min) / (cnt_max - cnt_min), \
+                (1 - ((val[READ_DIST_IDX] - dist_min) / (dist_max - dist_min))), \
+                (val[TPM_RATIO_IDX] - tpm_min) / (tpm_max - tpm_min)
+                ]
+        vals = np.sort(vals)
+        score = vals[1]*vals[2]
+        min_score = score if score < min_score else min_score
+        max_score = score if score > max_score else max_score
+        if score >= 0.7:
+            if k in weightDict:
+                weightDict[k] += score
+                increased += 1
+            else:
+                weightDict[k] = score
+                added += 1
+        score_cnt += 1
+        score_sum += score
+        score_squared_sum += score**2
+    score_mean = score_sum/score_cnt
+    score_std = (score_squared_sum/score_cnt - score_mean**2)**0.5
+    print ("Score: Min = {} , Max = {}, Mean = {}, STD = {}".format(min_score, max_score, score_mean, score_std))
+    print ("Links: Added = {} , Value Increased = {} ".format(added, increased))
+
+    # with open(orphanLink_out_file, 'w') as ofile:
+    #     ofile.write('{}\n'.format(len(tnames)))
+    #     for t in xrange(len(tnames)):
+    #         ofile.write('{}\t{}\t{}\n'.format(tnames[t], lens[t], tottpm[t]))
+    #     for k, v in orphan_reads.iteritems():
+    #         ofile.write('{};{}:{}\n'.format('\t'.join(str(e) for e in k),
+    #                                         '\t'.join(str(e) for e in v[0]),
+    #                                         '\t'.join(str(e) for e in v[1])))
+    # End of Orphan read section
 
     tnamesFilt = []
     relabel = {}
@@ -230,7 +309,7 @@ def filterGraph(expDict, netfile, ofile):
         for sampNum, sampPath in expDict[cond].iteritems():
             if cond not in eqClasses:
                 eqClasses[cond] = EquivCollection()
-            eqPath = os.path.sep.join([sampPath, "aux", "eq_classes.txt"])
+            eqPath = os.path.sep.join([sampPath, "aux_info", "eq_classes.txt"])
             readEqClass(eqPath, eqClasses[cond])
 
     ambigCounts = {cond : getCountsFromEquiv(eqClasses[cond]) for cond in conditions}
@@ -279,3 +358,87 @@ def filterGraph(expDict, netfile, ofile):
 
 
 
+def consider_orphan_reads(tnames, tpm, lens, sampdirs, orphanLink_out_file, read_file = True):
+    import itertools
+    import numpy as np
+    import os
+    sep = os.path.sep
+
+    orphan_pair = {}
+
+    if read_file:
+        line_cntr = 0
+        s1 = time.time()
+        for l in open(orphanLink_out_file + "_contigpair.txt"):
+            key, val = l.rstrip().split(';')
+            left, right = map(int, key.split(','))
+            vals = map(float, val.split('\t'))
+            orphan_pair[(left, right)] = vals
+            line_cntr += 1
+        e1 = time.time()
+        print("file: {}; # pairs = {}; time = {} secs".format(orphanLink_out_file + "_contigpair.txt", line_cntr,
+                                                              round(e1 - s1)))
+        return orphan_pair
+
+    CNT_IDX =0; READ_DIST_IDX=1; TPM_RATIO_IDX=2; R_EXTRA_NUCS_IDX=3; L_EXTRA_NUCS_IDX= 4
+    read_len = 101
+    orphanLinkFiles = [sep.join([sd, 'aux_info', '/orphan_links.txt']) for sd in sampdirs]
+    haveLinkFiles = all(os.path.isfile(f) for f in orphanLinkFiles)
+    if haveLinkFiles:
+        orphan_reads = {}
+        file_counter = 1
+        for olfile in orphanLinkFiles:
+            s1 = time.time()
+            new_cntr = 0
+            orphan_pair_cntr = 0
+            for l in open(olfile):
+                left, right = l.rstrip().split(':')
+                lp = [map(int, i.split(',')) for i in left.rstrip('\t').split('\t')]
+                rp = [map(int, i.split(',')) for i in right.split('\t')]
+
+                for l, r in itertools.product(lp, rp):
+                    orphan_pair_cntr += 1
+                    left = tnames[l[0]]
+                    right = tnames[r[0]]
+                    lidx = l[0]
+                    ridx = r[0]
+                    curr_read_dist = lens[lidx] - l[1] + ridx + read_len
+                    if (lidx, ridx) in orphan_pair:
+                        prev = orphan_reads[(left, right)]
+                        orphan_reads[(left, right)] = (prev[0] + [l[1]], prev[1] + [r[1]])
+                        orphan_pair[(lidx, ridx)][CNT_IDX] += 1
+                        orphan_pair[(lidx, ridx)][READ_DIST_IDX] += [curr_read_dist]
+                        orphan_pair[(lidx, ridx)][R_EXTRA_NUCS_IDX] = max(-1 * r[1],
+                                                                          orphan_pair[(lidx, ridx)][R_EXTRA_NUCS_IDX])
+                        orphan_pair[(lidx, ridx)][L_EXTRA_NUCS_IDX] = max(l[1] + read_len - lens[lidx],
+                                                                          orphan_pair[(lidx, ridx)][L_EXTRA_NUCS_IDX])
+                    else:
+                        new_cntr += 1
+                        orphan_reads[(left, right)] = ([l[1]], [r[1]])
+                        orphan_pair[(lidx, ridx)] = [0] * 5
+                        orphan_pair[(lidx, ridx)][CNT_IDX] = 1
+                        orphan_pair[(lidx, ridx)][READ_DIST_IDX] = [curr_read_dist]
+                        orphan_pair[(lidx, ridx)][R_EXTRA_NUCS_IDX] = max(-1 * r[1], 0)
+                        orphan_pair[(lidx, ridx)][L_EXTRA_NUCS_IDX] = max(l[1] + read_len - lens[lidx], 0)
+                        # tpm ratio
+                        orphan_pair[(lidx, ridx)][TPM_RATIO_IDX] = 0  # TODO, for simplicity!
+                        if tpm[lidx] != 0 and tpm[ridx] != 0:
+                            orphan_pair[(lidx, ridx)][TPM_RATIO_IDX] = np.min(
+                                [tpm[lidx] / tpm[ridx], tpm[ridx] / tpm[lidx]])
+            e1 = time.time()
+            print("{} file(s) finished with {} orphan pairs and {} new ones in {} secs". \
+                  format(file_counter, orphan_pair_cntr, new_cntr, round(e1 - s1)))
+            file_counter += 1
+        # averaging over all read distances between two transcripts
+        # before averaging add left extra nucleotides and right extra nucleotides to the distance for those reads
+        # passing the transcript length
+        for k, val in orphan_pair.iteritems():
+            orphan_pair[k][READ_DIST_IDX] = np.mean(
+                [r + val[R_EXTRA_NUCS_IDX] + val[L_EXTRA_NUCS_IDX] for r in val[READ_DIST_IDX]])
+
+        with open(orphanLink_out_file + "_contigpair.txt", 'w') as ofile:
+            for k, v in orphan_pair.iteritems():
+                ofile.write('{};{}\n'.format(','.join(str(e) for e in k),
+                                             '\t'.join(str(e) for e in v)))
+
+    return orphan_pair

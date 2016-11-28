@@ -49,9 +49,10 @@ def processQuant(config):
     # now the outdir exists
     netFile = os.path.sep.join([outdir, "mag.net"])
     # Make the network
+    orphanFile = os.path.sep.join([outdir, "orphanLink"])
 
     logging.info("Building multiple alignment graph")
-    eqnet.buildNetFile(sampleDirs, netFile, cutoff)
+    eqnet.buildNetFile(sampleDirs, netFile, orphanFile, cutoff)
     # Filter the network
     filtNetFile = os.path.sep.join([outdir, "mag.filt.net"])
 
