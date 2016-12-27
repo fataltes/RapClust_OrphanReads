@@ -40,27 +40,41 @@ def accuracyExpressed(groundTruth_clust, tr_clust):
 def accuracyExpressedFast(groundTruth_clust, groundTruth_clust_inv, tr_clust, tr_clust_inv):
     #num = len(set(tr_clust.keys()) & set(groundTruth_clust.keys()))
     num = len(set(groundTruth_clust.keys()))
-    tp, fp, tn, fn, orphan_cnt = 0, 0, 0, 0, 0
+    tp, fp, tn, fn, orphan_cnt, cls_cntr, gt_cls_cntr, rprec, rrec = 0, 0, 0, 0, 0, 0, 0, 0, 0
     for clustName, clustMems in tr_clust_inv.iteritems():
+        cls_cntr += 1
+        cls_cnt, cls_tp = 0, 0
         for tr_1, tr_2 in itertools.combinations(clustMems,2):
             if tr_1 not in groundTruth_clust or tr_2 not in groundTruth_clust:
                 continue
+            cls_cnt += 1
             if groundTruth_clust[tr_1] == groundTruth_clust[tr_2]:
                 tp += 1
+                cls_tp += 1
             else:
                 fp += 1
+        if cls_cnt != 0:
+            rprec += (cls_tp/cls_cnt)
     for clustName, clustMems in groundTruth_clust_inv.iteritems():
+        if len(clustMems)>1:
+            gt_cls_cntr += 1
+        cls_cnt, cls_tp = 0, 0
         for tr_1, tr_2 in itertools.combinations(clustMems,2):
             if tr_1 not in tr_clust or tr_2 not in tr_clust:
                 continue
+            cls_cnt += 1
             if tr_clust[tr_1] != tr_clust[tr_2]:
                 fn += 1
+            else:
+                cls_tp += 1
+        if cls_cnt != 0:
+            rrec += (cls_tp/cls_cnt)
 
     nc2 = (num * (num-1)) / 2
     tn = nc2 - (fp + tp + fn)
-    return tp, fp, tn, fn
+    return tp, fp, tn, fn, rprec/cls_cntr, rrec/gt_cls_cntr
 
-def weightCorrelation (weightGraph, groundTruth_clust, groundTruth_clust_inv):
+def weightCorrelation(weightGraph, groundTruth_clust, groundTruth_clust_inv):
     class0 = []
     class1 = []
     corrupted = set()
@@ -79,10 +93,11 @@ def weightCorrelation (weightGraph, groundTruth_clust, groundTruth_clust_inv):
     print(corrupted)
     from matplotlib import pyplot as plt
     plt.figure()
-    plt.scatter(class0+class1, [0]*len(class0) + [1]*len(class1))
+    plt.scatter(class0+class1, [0]*len(class0) + [1]*len(class1), alpha=.01)
     plt.ylabel("same/different cluster (1:same cluster)")
     plt.xlabel("link weights")
     plt.show()
+    print ("# pairs from the same gene:{}, # of pairs from different genes:{}".format(len(class1), len(class0)))
 
 def readNetFile(fn):
     weightGraph = {}
@@ -131,7 +146,7 @@ def readTrueLabels(fn):
     groundTruth_clust_inv = {}
     gtClusterCount = {}
     for line in ft:
-        tr_gn = line[:-1].split("\t")
+        tr_gn = map(str.strip, line[:-1].split("\t"))
         groundTruth_clust[tr_gn[0]] = tr_gn[1]
         if tr_gn[0] in gtClusterCount:
             gtClusterCount[tr_gn[0]] += 1
@@ -194,14 +209,16 @@ def measurePrecRecall(qsf, sp, ctype):
         ft = trinity_rice
     groundTruth_clust, ground_truth_clust_inv = readTrueLabels(ft)
     weightGraph = readNetFile("transcripts/human_rapclust/mag.filt.net")
-    tp, fp, tn, fn = accuracyExpressedFast(groundTruth_clust, ground_truth_clust_inv,
+    tp, fp, tn, fn, rprec, rrec = accuracyExpressedFast(groundTruth_clust, ground_truth_clust_inv,
                                                        tr_clust, tr_clust_inv)
     weightCorrelation(weightGraph, groundTruth_clust, ground_truth_clust_inv)
     print("tp : {}, fp : {}, tn : {}, fn : {}".format(tp, fp, tn, fn))
     precision = tp / float(tp + fp)
     recall = tp / float(tp + fn)
     Fscore = 2 * ((precision*recall) / (precision+recall))
+    rfscore = 2 * (rprec*rrec) / (rprec + rrec)
     print("prec: {}, recall: {}, F1: {}".format(precision, recall, Fscore))
+    print("rel. prec: {}, rel. recall:{}, rel. F1: {}".format(rprec, rrec, rfscore))
 
 import argparse
 
