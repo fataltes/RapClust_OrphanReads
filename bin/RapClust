@@ -69,12 +69,8 @@ def processQuant(config):
     orphanFile = os.path.sep.join([outdir, "orphanLink"])
 
     logging.info("Building multiple alignment graph")
-<<<<<<< HEAD
     eqnet.buildNetFile(sampleDirs, netFile, orphanFile, cutoff, auxDir)
 
-=======
-    eqnet.buildNetFile(sampleDirs, netFile, orphanFile, cutoff)
->>>>>>> 2d312649bf99349d00bd997fdc6534881465c180
     # Filter the network
     filtNetFile = os.path.sep.join([outdir, "mag.filt.net"])
 
