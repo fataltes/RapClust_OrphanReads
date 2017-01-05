@@ -112,15 +112,13 @@ def orphanCorrelation(orphanPair, groundTruth_clust, groundTruth_clust_inv):
     for key, orphan in orphanPair.iteritems():
         if key[0] in groundTruth_clust and key[1] in groundTruth_clust:
             if groundTruth_clust[key[0]] == groundTruth_clust[key[1]]:
-                if float(orphan[0]) > 1:
-                    class1[0] += [float(orphan[0])]
-                    class1[1] += [float(orphan[1])]
-                    class1[2] += [float(orphan[2])]
+                class1[0] += [float(orphan[0])]
+                class1[1] += [float(orphan[1])]
+                class1[2] += [float(orphan[2])]
             else:
-                if float(orphan[0]) > 1:
-                    class0[0] += [float(orphan[0])]
-                    class0[1] += [float(orphan[1])]
-                    class0[2] += [float(orphan[2])]
+                class0[0] += [float(orphan[0])]
+                class0[1] += [float(orphan[1])]
+                class0[2] += [float(orphan[2])]
         else:
             if key[0] not in groundTruth_clust:
                 corrupted.add(key[0])
