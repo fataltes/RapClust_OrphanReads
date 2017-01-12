@@ -81,6 +81,8 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
 
     lens = quant.loc[tnames, 'Length'].values
 
+
+    minWeight = 0.5
     maxWeight = 0.0
     prior = 0.1
     edgesToRemove = []
@@ -97,6 +99,8 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
             weightDict[k] = w
             if w > maxWeight:
                 maxWeight = w
+            #if w < minWeight:
+            #    edgesToRemove.append(k)
         else:
             edgesToRemove.append(k)
 
@@ -105,45 +109,52 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
         del weightDict[e]
 
     # Considering Orphan reads
-    # def nearEnd(tup):
-    #     txp = tup[0]
-    #     pos = tup[1]
-    #     moverhang = 10
-    #     ml = 100
-    #     if pos < -moverhang or pos > lens[txp] + moverhang:
-    #         return False
-    #     elif pos <= ml or pos >= lens[txp] - ml:
-    #         return True
-    #     else:
-    #         return False
-    #
-    # orphanLinkFiles = [sep.join([sd, auxDir, '/orphan_links.txt']) for sd in sampdirs]
-    # haveLinkFiles = all(os.path.isfile(f) for f in orphanLinkFiles)
-    # if haveLinkFiles:
-    #     numOrphanLinks = 0
-    #     for olfile in orphanLinkFiles:
-    #         for l in open(olfile):
-    #             left, right = l.rstrip().split(':')
-    #             lp = [map(int, i.split(',')) for i in left.rstrip('\t').split('\t')]
-    #             rp = [map(int, i.split(',')) for i in right.split('\t')]
-    #             lp = [t[0] for t in filter(nearEnd, lp)]
-    #             rp = [t[0] for t in filter(nearEnd, rp)]
-    #             if len(lp) == 1 and len(rp) == 1:
-    #                 for a, b in itertools.product(lp, rp):
-    #                     if ambigCounts[a] < cutoff or ambigCounts[b] < cutoff:
-    #                         continue
-    #                     c0, c1 = diagCounts[a], diagCounts[b]
-    #                     a0, a1 = ambigCounts[a], ambigCounts[b]
-    #                     key = (a, b) if a < b else (b, a)
-    #                     if key not in weightDict:
-    #                         numOrphanLinks += 1
-    #                         weightDict[key] = 1.0 / min(a0, a1)
-    #                     else:
-    #                         weightDict[key] += 1.0 / min(a0, a1)
-    #     logging.info("Added {} orphan link edges".format(numOrphanLinks))
+    def nearEnd(tup):
+        txp = tup[0]
+        pos = tup[1]
+        moverhang = 10
+        ml = 100
+        if pos < -moverhang or pos > lens[txp] + moverhang:
+            return False
+        elif pos <= ml or pos >= lens[txp] - ml:
+            return True
+        else:
+            return False
+
+    orphanLinkFiles = [sep.join([sd, auxDir, '/orphan_links.txt']) for sd in sampdirs]
+    haveLinkFiles = all(os.path.isfile(f) for f in orphanLinkFiles)
+    if haveLinkFiles:
+        numOrphanLinks = 0
+        for olfile in orphanLinkFiles:
+            for l in open(olfile):
+                left, right = l.rstrip().split(':')
+                lp = [map(int, i.split(',')) for i in left.rstrip('\t').split('\t')]
+                rp = [map(int, i.split(',')) for i in right.split('\t')]
+                lp = [t for t in filter(nearEnd, lp)]
+                rp = [t for t in filter(nearEnd, rp)]
+                #if len(lp) == 1 or len(rp) == 1:
+                for a, b in itertools.product(lp, rp):
+                    ltpm = tpm[a[0]] + 10 ** -11  # Laplacian Smoothing
+                    rtpm = tpm[b[0]] + 10 ** -11
+                    tpm_ratio = 1 - (abs(ltpm - rtpm) / (ltpm + rtpm))
+                    read_dist = lens[a[0]] - a[1] + b[1]
+                    if tpm_ratio >= .5: # and read_dist <= 300 and tpm[a[0]] > .5 and tpm[b[0]] > .5:
+                        a = a[0]; b = b[0]
+                        key = (a, b) if a < b else (b, a)
+                        if ambigCounts[a] < cutoff or ambigCounts[b] < cutoff:
+                            continue
+                        c0, c1 = diagCounts[a], diagCounts[b]
+                        a0, a1 = ambigCounts[a], ambigCounts[b]
+                        if key not in weightDict:
+                            numOrphanLinks += 1
+                            weightDict[key] = 1.0 / min(a0, a1)
+                        else:
+                            weightDict[key] += 1.0 / min(a0, a1)
+        logging.info("Added {} orphan link edges".format(numOrphanLinks))
+
 
     # CNT_IDX =0; READ_DIST_IDX=1; TPM_RATIO_IDX=2
-    consider_orphan_reads(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxDir, load_calculated_file=False)
+    # consider_orphan_reads(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxDir, load_calculated_file=False)
     #
     # import sys
     # cnt_min = sys.maxsize
@@ -201,6 +212,7 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
     # #plt.hist(scores, bins = 200)
     # #plt.show()
     # #End of Orphan read section
+
 
     tnamesFilt = []
     relabel = {}
@@ -412,7 +424,10 @@ def consider_orphan_reads(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxD
                                                               round(e1 - s1)))
         return orphan_pair
 
-    CNT_IDX =0; READ_DIST_IDX=1; TPM_RATIO_IDX=2; R_EXTRA_NUCS_IDX=3; L_EXTRA_NUCS_IDX= 4;
+    CNT_IDX =0; WEIGHTED_CNT_IDX=1; UNIPARTIAL_CNT_IDX=2; WINNER_CNT=3
+    AVG_DIST_IDX=4; WEIGHTED_AVG_DIST_IDX=5; UNIPARTIAL_AVG_DIST_IDX=6; WINNER_AVG_DIST_IDX=7
+    TPM_RATIO_IDX=8; TPM_TPM_RATIO_IDX=9
+    R_EXTRA_NUCS_IDX=10; L_EXTRA_NUCS_IDX= 11
     read_len = 101
     orphanLinkFiles = [sep.join([sd, auxDir, '/orphan_links.txt']) for sd in sampdirs]
     haveLinkFiles = all(os.path.isfile(f) for f in orphanLinkFiles)
@@ -428,9 +443,10 @@ def consider_orphan_reads(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxD
                 lp = [map(int, i.split(',')) for i in left.rstrip('\t').split('\t')]
                 rp = [map(int, i.split(',')) for i in right.split('\t')]
 
-                each_read_dist = {}
-                each_tpm_ratio = {}
-                each_read_pos = {}
+                read_dist = {}
+                tpm_ratio = {}
+                tpm_tpm_ratio = {}
+                read_pos = {}
 
                 # for each read pair, we might have multiple contig pairs
                 # In the following we would choose the best based with maximum score:
@@ -439,66 +455,78 @@ def consider_orphan_reads(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxD
                 for l, r in itertools.product(lp, rp): # read all possible contig pairs for each read pair
                     lidx = l[0]
                     ridx = r[0]
-                    each_tpm_ratio[(lidx, ridx)] = 0  # TODO, for simplicity!
-                    if tpm[lidx] == 0 and tpm[ridx]== 0: each_tpm_ratio[(lidx, ridx)] = 1
-                    if tpm[lidx] != 0 and tpm[ridx] != 0:
-                        #1 - (abs(tpm[lidx]-tpm[ridx])/(tpm[lidx]+tpm[ridx]))
-                        each_tpm_ratio[(lidx, ridx)] = min(tpm[lidx]/tpm[ridx], tpm[ridx]/tpm[lidx])
-                    #if lidx == 0:
-                    #    print("{}, {}, {}, {}, {}\n".format(ridx, lens[lidx], l[1], r[1], lens[lidx] - l[1] + r[1] + read_len))
-                    each_read_dist[(lidx, ridx)] = lens[lidx] - l[1] + r[1] + read_len
-                    each_read_pos[(lidx, ridx)] = (l[1], r[1])
+                    ltpm = tpm[lidx]+10**-11 # Laplacian Smoothing
+                    rtpm = tpm[ridx]+10**-11
+                    tpm_tpm_ratio[(lidx, ridx)] = 1 - (abs(ltpm-rtpm)/(ltpm+rtpm))
+                    tpm_ratio[(lidx, ridx)] = min(ltpm/rtpm, rtpm/ltpm)
+                    read_dist[(lidx, ridx)] = lens[lidx] - l[1] + r[1] + read_len
+                    read_pos[(lidx, ridx)] = (l[1], r[1])
                     total_orpha_pair_cntr += 1
 
-                maxKey = (-1, -1)
-                if len(lp) == 1 and len(rp) == 1: # if we have just one option choose that option
-                    maxKey = (lidx, ridx)
+                pair_cnt = len(tpm_ratio)
+                pair_weight_sum = sum(tpm_tpm_ratio.values())
 
-                else: # find best contig pair
-                    maxScore = -1
-                    min_read_dist = np.min(each_read_dist.values()) - 1
-                    max_read_dist = np.max(each_read_dist.values())
-                    # choose contig pair with maximum score
-                    for k in each_read_dist.keys():
-                        score = (1-(each_read_dist[k] - min_read_dist)/(max_read_dist-min_read_dist))*(each_tpm_ratio[k])
-                        if score > maxScore:
-                            maxKey = k
-                            maxScore = score
-                # Add this read to the collection of orphan read pairs
-                orphan_pair_cntr += 1
-                if maxKey not in orphan_pair: # if read pair not existing before, just create a dummy to update later
-                    orphan_reads[maxKey] = ([], [])
-                    orphan_pair[maxKey] = [0, [], each_tpm_ratio[maxKey], 0, 0]
-                    new_cntr += 1
-                prev = orphan_reads[maxKey]
-                orphan_reads[maxKey] = (prev[0] + [each_read_pos[maxKey][0]], prev[1] + [each_read_pos[maxKey][1]])
-                orphan_pair[maxKey][CNT_IDX] += 1
-                orphan_pair[maxKey][READ_DIST_IDX] += [each_read_dist[maxKey]]
-                orphan_pair[maxKey][R_EXTRA_NUCS_IDX] = max(-1 * each_read_pos[maxKey][1],
-                                                                  orphan_pair[maxKey][R_EXTRA_NUCS_IDX])
-                orphan_pair[maxKey][L_EXTRA_NUCS_IDX] = max(each_read_pos[maxKey][0] + read_len - lens[lidx],
-                                                                  orphan_pair[maxKey][L_EXTRA_NUCS_IDX])
+                maxKey = (-1, -1)
+                maxScore = -1
+                min_read_dist = np.min(read_dist.values()) - 1
+                max_read_dist = np.max(read_dist.values())
+                # choose contig pair with maximum score
+                for k in read_dist.keys():
+                    orphan_pair_cntr += 1
+                    weighted_cnt = tpm_tpm_ratio[k] / pair_weight_sum
+                    unipartial_cnt = 1 / pair_cnt
+                    weighted_dist = weighted_cnt * read_dist[k]
+                    unipartial_dist = unipartial_cnt * read_dist[k]
+                    if k not in orphan_pair:
+                        new_cntr += 1
+                        orphan_pair[k] = [0, 0, 0, 0,
+                                          [], [], [], [],
+                                          tpm_ratio[k], tpm_tpm_ratio[k], 0, 0]
+                    orphan_pair[k][CNT_IDX] += 1
+                    orphan_pair[k][WEIGHTED_CNT_IDX] += weighted_cnt
+                    orphan_pair[k][UNIPARTIAL_CNT_IDX] += unipartial_cnt
+                    orphan_pair[k][AVG_DIST_IDX] += [read_dist[k]]
+                    orphan_pair[k][WEIGHTED_AVG_DIST_IDX] += [weighted_dist]
+                    orphan_pair[k][UNIPARTIAL_AVG_DIST_IDX] += [unipartial_dist]
+                    orphan_pair[k][R_EXTRA_NUCS_IDX] = max(-1 * read_pos[k][1],
+                                                                orphan_pair[k][R_EXTRA_NUCS_IDX])
+                    orphan_pair[k][L_EXTRA_NUCS_IDX] = max(read_pos[k][0] + read_len - lens[lidx],
+                                                                orphan_pair[k][L_EXTRA_NUCS_IDX])
+                    score = (1-(read_dist[k] - min_read_dist)/(max_read_dist-min_read_dist))*(tpm_tpm_ratio[k])
+                    if score > maxScore:
+                        maxKey = k
+                        maxScore = score
+                orphan_pair[maxKey][WINNER_CNT] += 1
+                orphan_pair[maxKey][WINNER_AVG_DIST_IDX] += [read_dist[maxKey]]
+
             e1 = time.time()
-            logger.info("file: {}; # orphan pairs = {}; # chosen orphan pairs = {}; # new pairs = {}; time = {} secs". \
+            logger.info("file: {}; orphaned read pairs: total = {}; # chosen = {}; # new = {}; time = {} secs". \
                   format(olfile, total_orpha_pair_cntr, orphan_pair_cntr, new_cntr, round(e1 - s1)))
         # averaging over all read distances between two transcripts
         # before averaging add left extra nucleotides and right extra nucleotides to the distance for those reads
         # passing the transcript length
         for k, val in orphan_pair.iteritems():
-            orphan_pair[k][READ_DIST_IDX] = np.mean(
-                [r + val[R_EXTRA_NUCS_IDX] + val[L_EXTRA_NUCS_IDX] for r in val[READ_DIST_IDX]])
+            orphan_pair[k][AVG_DIST_IDX] = round(np.sum(
+                [r + val[R_EXTRA_NUCS_IDX] + val[L_EXTRA_NUCS_IDX] for r in val[AVG_DIST_IDX]])/val[CNT_IDX])
+            orphan_pair[k][WEIGHTED_AVG_DIST_IDX] = round(np.sum(
+                [r + val[R_EXTRA_NUCS_IDX] + val[L_EXTRA_NUCS_IDX] for r in val[WEIGHTED_AVG_DIST_IDX]]) \
+                                                    / val[WEIGHTED_CNT_IDX])
+            orphan_pair[k][UNIPARTIAL_AVG_DIST_IDX] = round(np.sum(
+                [r + val[R_EXTRA_NUCS_IDX] + val[L_EXTRA_NUCS_IDX] for r in val[UNIPARTIAL_AVG_DIST_IDX]]) \
+                                                      / val[UNIPARTIAL_CNT_IDX])
+            orphan_pair[k][WINNER_AVG_DIST_IDX] = round(np.sum(
+                [r + val[R_EXTRA_NUCS_IDX] + val[L_EXTRA_NUCS_IDX] for r in val[WINNER_AVG_DIST_IDX]]) \
+                                                  / val[WINNER_CNT])
+            orphan_pair[k][WEIGHTED_CNT_IDX] = round(orphan_pair[k][WEIGHTED_CNT_IDX], 2)
+            orphan_pair[k][UNIPARTIAL_CNT_IDX] = round(orphan_pair[k][UNIPARTIAL_CNT_IDX], 2)
+
+            orphan_pair[k][TPM_RATIO_IDX] = round(orphan_pair[k][TPM_RATIO_IDX], 4)
+            orphan_pair[k][TPM_TPM_RATIO_IDX] = round(orphan_pair[k][TPM_TPM_RATIO_IDX], 4)
 
         with open(orphanLink_out_file + "_contigpair.txt", 'w') as ofile:
             for k, v in orphan_pair.iteritems():
-                ofile.write('{};{}\n'.format(','.join(str(e) for e in k),
-                                             '\t'.join(str(e) for e in v[0:3]))) # we just need cnt, read dist, & tpm ratio
+                ofile.write('{},{};{}\n'.format(tnames[k[0]], tnames[k[1]],
+                                             '\t'.join(str(e) for e in v[CNT_IDX:TPM_TPM_RATIO_IDX+1])))
 
-        with open(orphanLink_out_file, 'w') as ofile:
-            ofile.write('{}\n'.format(len(tnames)))
-            for t in xrange(len(tnames)):
-                ofile.write('{}\t{}\t{}\n'.format(tnames[t], lens[t], tpm[t]))
-            for k, v in orphan_reads.iteritems():
-                ofile.write('{};{}:{}\n'.format('\t'.join(str(e) for e in k),
-                                                '\t'.join(str(e) for e in v[0]),
-                                                '\t'.join(str(e) for e in v[1])))
+
     return orphan_pair

@@ -2,8 +2,8 @@ from __future__ import division
 import itertools
 import time
 from matplotlib import pyplot as plt
-trinity_human = "./tx2GeneNameHuman.38.80.txt"
-#trinity_human = "./contigs2genes.disambiguous.txt"
+#trinity_human = "./tx2GeneNameHuman.38.80.txt"
+trinity_human = "./contigs2genes.disambiguous.txt"
 class Classification:
     TruePos, FalsePos, TrueNeg, FalseNeg = range(4)
 
@@ -106,19 +106,25 @@ def weightCorrelation(weightGraph, groundTruth_clust, groundTruth_clust_inv):
     plt.xlabel("link weights")
 
 def orphanCorrelation(orphanPair, groundTruth_clust, groundTruth_clust_inv):
-    class0 = [[] for x in range(3)]
-    class1 = [[] for x in range(3)]
+    CNT_IDX = 0; WEIGHTED_CNT_IDX = 1; UNIPART_CNT_IDX = 2; WINNER_CNT_IDX = 3
+    DIST_IDX = 4; WEIGHTED_DIST_IDX = 5; UNIPART_DIST_IDX = 6; WINNER_DIST_IDX = 7
+    class0 = [[] for x in range(10)]
+    class1 = [[] for x in range(10)]
     corrupted = set()
     for key, orphan in orphanPair.iteritems():
         if key[0] in groundTruth_clust and key[1] in groundTruth_clust:
             if groundTruth_clust[key[0]] == groundTruth_clust[key[1]]:
-                class1[0] += [float(orphan[0])]
-                class1[1] += [float(orphan[1])]
-                class1[2] += [float(orphan[2])]
+                for idx in [CNT_IDX, WEIGHTED_CNT_IDX, UNIPART_CNT_IDX, DIST_IDX, WEIGHTED_DIST_IDX, UNIPART_DIST_IDX]:
+                    class1[idx] += [float(orphan[idx])]
+                if float(orphan[WINNER_CNT_IDX]) > 0:
+                    class1[WINNER_CNT_IDX] += [float(orphan[WINNER_CNT_IDX])]
+                    class1[WINNER_DIST_IDX] += [float(orphan[WINNER_DIST_IDX])]
             else:
-                class0[0] += [float(orphan[0])]
-                class0[1] += [float(orphan[1])]
-                class0[2] += [float(orphan[2])]
+                for idx in [CNT_IDX, WEIGHTED_CNT_IDX, UNIPART_CNT_IDX, DIST_IDX, WEIGHTED_DIST_IDX, UNIPART_DIST_IDX]:
+                    class0[idx] += [float(orphan[idx])]
+                if float(orphan[WINNER_CNT_IDX]) > 0:
+                    class0[WINNER_CNT_IDX] += [float(orphan[WINNER_CNT_IDX])]
+                    class0[WINNER_DIST_IDX] += [float(orphan[WINNER_DIST_IDX])]
         else:
             if key[0] not in groundTruth_clust:
                 corrupted.add(key[0])
@@ -127,59 +133,100 @@ def orphanCorrelation(orphanPair, groundTruth_clust, groundTruth_clust_inv):
     print("corrupted: {}".format(len(corrupted)))
     #print(corrupted)
     print("")
-    print("# in same gene: {}, # in different gene:{}".format(len(class1[0]), len(class0[0])))
+    print("total: # in same gene: {}, # in different gene:{}".format(len(class1[CNT_IDX]), len(class0[CNT_IDX])))
+    print("winner: # in same gene: {}, # in different gene:{}".format(len(class1[WINNER_CNT_IDX]), len(class0[WINNER_CNT_IDX])))
 
     from matplotlib import pyplot as plt
-    f, ax = plt.subplots(2, 3)
-    ax[0, 0].hist([c for c in class0[0] if c <= 50], bins=range(1, 51))
+    f, ax = plt.subplots(2, 4)
+    #ax[0, 0].hist(class0[CNT_IDX], bins=range(0,6))
+    ax[0, 0].hist(class0[CNT_IDX], bins=50, alpha=.5, label='diff')
+    ax[0, 0].hist(class1[CNT_IDX], bins=50, alpha=.5, label='same')
     ax[0, 0].set_title("Different Genes")
     ax[0, 0].set_ylabel("frequency")
-    ax[1, 0].hist([c for c in class1[0] if c <= 50], bins=50)
+    #ax[1, 0].hist(class1[CNT_IDX], bins=range(0,6))
+    ax[1, 0].hist(class0[CNT_IDX], bins=50)
     ax[1, 0].set_title("Same Gene")
     ax[1, 0].set_ylabel("frequency")
-    ax[1, 0].set_xlabel("orphan count")
+    ax[1, 0].set_xlabel("count")
 
-    ax[0, 1].hist([c for c in class0[1] if c <= 5000], bins=1000)
+    #ax[0, 1].hist(class0[WINNER_CNT_IDX], bins=range(0,6))
+    ax[0, 1].hist(class0[WINNER_CNT_IDX], bins=50)
     ax[0, 1].set_title("Different Genes")
-    ax[1, 1].hist([c for c in class1[1] if c <= 5000], bins=1000)
+    #ax[1, 1].hist(class1[WINNER_CNT_IDX], bins=range(0,6))
+    ax[1, 1].hist(class0[WINNER_CNT_IDX], bins=50)
     ax[1, 1].set_title("Same Gene")
-    ax[1, 1].set_xlabel("orphan dist")
+    ax[1, 1].set_xlabel("winner count")
 
-    import numpy as np
-    ax[0, 2].hist([np.log(c) if c > 0 else -40 for c in class0[2]], bins=100)
+    #ax[0, 2].hist(class0[UNIPART_CNT_IDX], bins=range(0,6))
+    ax[0, 2].hist(class0[UNIPART_CNT_IDX], bins=50)
     ax[0, 2].set_title("Different Genes")
-    ax[1, 2].hist([np.log(c) if c > 0 else -40 for c in class1[2]], bins=100)
+    #ax[1, 2].hist(class1[UNIPART_CNT_IDX], bins=range(0,6))
+    ax[1, 2].hist(class1[UNIPART_CNT_IDX], bins=50)
     ax[1, 2].set_title("Same Gene")
-    ax[1, 2].set_xlabel("orphan tpm")
+    ax[1, 2].set_xlabel("partial count")
+
+    #ax[0, 3].hist(class0[WEIGHTED_CNT_IDX], bins=range(0,6))
+    ax[0, 3].hist(class0[WEIGHTED_CNT_IDX], bins=50)
+    ax[0, 3].set_title("Different Genes")
+    #ax[1, 3].hist(class1[WEIGHTED_CNT_IDX], bins=range(0,6))
+    ax[1, 3].hist(class1[WEIGHTED_CNT_IDX], bins=50)
+    ax[1, 3].set_title("Same Gene")
+    ax[1, 3].set_xlabel("weighted count")
 
 
-def readOrphans(contig_file, orphan_file):
+    f, ax = plt.subplots(2, 4)
+    #ax[0, 0].hist([c for c in class0[DIST_IDX] if c < 1000], bins=100)
+    ax[0, 0].hist(class0[DIST_IDX], bins=100)
+    ax[0, 0].set_title("Different Genes")
+    ax[0, 0].set_ylabel("frequency")
+    #ax[1, 0].hist([c for c in class1[DIST_IDX] if c < 1000], bins=100)
+    ax[1, 0].hist(class1[DIST_IDX], bins=100)
+    ax[1, 0].set_title("Same Gene")
+    ax[1, 0].set_ylabel("frequency")
+    ax[1, 0].set_xlabel("dist")
+
+    #ax[0, 1].hist([c for c in class0[WINNER_DIST_IDX] if c < 1000], bins=100)
+    ax[0, 1].hist(class0[WINNER_DIST_IDX], bins=100)
+    ax[0, 1].set_title("Different Genes")
+    #ax[1, 1].hist([c for c in class1[WINNER_DIST_IDX] if c < 1000], bins=100)
+    ax[1, 1].hist(class1[WINNER_DIST_IDX], bins=100)
+    ax[1, 1].set_title("Same Gene")
+    ax[1, 1].set_xlabel("winner dist")
+
+    #ax[0, 2].hist([c for c in class0[UNIPART_DIST_IDX] if c < 1000], bins=100)
+    ax[0, 1].hist(class0[WINNER_DIST_IDX], bins=100)
+    ax[0, 2].set_title("Different Genes")
+    #ax[1, 2].hist([c for c in class1[UNIPART_DIST_IDX] if c < 1000], bins=100)
+    ax[1, 1].hist(class1[WINNER_DIST_IDX], bins=100)
+    ax[1, 2].set_title("Same Gene")
+    ax[1, 2].set_xlabel("partial dist")
+
+    # cc0 = []
+    # for i in range(len(class0[WEIGHTED_DIST_IDX])):
+    #     if class0[WEIGHTED_CNT_IDX][i] <= 1:
+    #         cc0 += [class0[DIST_IDX][i]]
+    # cc1 = []
+    # for i in range(len(class1[WEIGHTED_DIST_IDX])):
+    #     if class1[WEIGHTED_CNT_IDX][i] <= 1:
+    #         cc1 += [class1[DIST_IDX][i]]
+    #ax[0, 3].hist([c for c in class0[WEIGHTED_CNT_IDX] if c < 5], bins=100)
+    ax[0, 3].hist(class0[WEIGHTED_CNT_IDX], bins=100)
+    ax[0, 3].set_title("Different Genes")
+    #ax[1, 3].hist([c for c in class1[WEIGHTED_CNT_IDX] if c < 5], bins=100)
+    ax[1, 3].hist(class1[WEIGHTED_CNT_IDX], bins=100)
+    ax[1, 3].set_title("Same Gene")
+    ax[1, 3].set_xlabel("weighted dist")
+
+
+def readOrphans(orphan_file):
     orphan_reads = {}
-    contigs_info = []
-    with open(contig_file) as contigs:
-        seq_cnt = int(contigs.readline().rstrip())
-        for i in xrange(seq_cnt):
-            tname, tlen, ttmp = contigs.readline().rstrip().split('\t')
-            contigs_info.append(tname)
     with open(orphan_file) as orphan:
         for line in orphan:
-            key, value = line.rstrip().split(';') # key : c1, c2 & value : count, distance, tpm_ratio
-            l, r = map(int, key.rstrip().split(","))
+            key, value = line.rstrip().split(';') # key : c1, c2 & value : counts, distances and tpm_ratios
+            l, r = key.rstrip().split(",")
             val = map(float, value.rstrip().split('\t'))
-            orphan_reads[(contigs_info[l], contigs_info[r])] = val
-    # with open(orphan_file) as orphan:
-    #     seq_cnt = int(orphan.readline().rstrip())
-    #     for i in xrange(seq_cnt):
-    #         tname, tlen, ttmp = orphan.readline().rstrip().split('\t')
-    #         contigs_info[tname] = (int(tlen), float(ttmp))
-    #     for line in orphan:
-    #         key, value = line.rstrip().split(';') # key : c1, c2 & value : count, distance, tpm_ratio
-    #         l, r = key.rstrip().split("\t")
-    #         left, right = value.split(':')
-    #         left = map(int, left.rstrip().split('\t'))
-    #         right = map(int, right.rstrip().split('\t'))
-    #         orphan_reads[(l, r)] = (left, right)
-    return orphan_reads #, contigs_info
+            orphan_reads[(l, r)] = val
+    return orphan_reads
 
 def sortOrphanReads(orphan_file, orphan_reads):
     orphan_reads = sorted(orphan_reads.items(), key=lambda e: e[1][0])
@@ -193,6 +240,10 @@ def contigSupport(orphan_reads):
         if v[0] not in read_cnt_dist:
             read_cnt_dist[v[0]] = 0
         read_cnt_dist[v[0]] += 1
+    plt.figure()
+    plt.plot(read_cnt_dist.keys()[0:5], read_cnt_dist.values()[0:5])
+    plt.xlabel("# reads supporting contig pair")
+    plt.ylabel("frequency")
     return read_cnt_dist
 
 def readNetFile(fn):
@@ -287,7 +338,7 @@ def readCommClust(fn):
             tr_clust_inv[v] = [k]
     return tr_clust, tr_clust_inv
 
-def measurePrecRecall(qsf, sp, ctype):
+def measurePrecRecall(qsf, sp, ctype, orphanfile):
     if ctype == "mcl":
         tr_clust, tr_clust_inv = readMCLClust(qsf)
     elif ctype == "corset":
@@ -304,7 +355,7 @@ def measurePrecRecall(qsf, sp, ctype):
     elif (sp == 'rice'):
         ft = trinity_rice
     groundTruth_clust, ground_truth_clust_inv = readTrueLabels(ft)
-    dir = "transcripts/human_rapclust"
+    dir = "bin/human_rapclust"
     weightGraph = readNetFile("{}/mag.filt.net".format(dir))
     tp, fp, tn, fn, rprec, rrec = accuracyExpressedFast(groundTruth_clust, ground_truth_clust_inv,
                                                        tr_clust, tr_clust_inv)
@@ -316,15 +367,11 @@ def measurePrecRecall(qsf, sp, ctype):
     rfscore = 2 * (rprec*rrec) / (rprec + rrec)
     print("prec: {}, recall: {}, F1: {}".format(precision, recall, Fscore))
     print("rel. prec: {}, rel. recall:{}, rel. F1: {}".format(rprec, rrec, rfscore))
-    orphan_reads = readOrphans("{}/orphanLink".format(dir), "{}/orphanLink_contigpair.txt".format(dir))
-    orphanCorrelation(orphan_reads, groundTruth_clust, ground_truth_clust_inv)
-    sortOrphanReads("{}/orphanLink".format(dir), orphan_reads)
+    #orphan_reads = readOrphans(orphanfile)
+    #orphanCorrelation(orphan_reads, groundTruth_clust, ground_truth_clust_inv)
+    #sortOrphanReads("{}/orphanLink".format(dir), orphan_reads)
     #read_cnt_dist = contigSupport(orphan_reads)
-    #plt.figure()
-    #plt.plot(read_cnt_dist.keys()[0:5], read_cnt_dist.values()[0:5])
-    #plt.xlabel("# reads supporting contig pair")
-    #plt.ylabel("frequency")
-    plt.show()
+    #plt.show()
 
 import argparse
 
@@ -335,7 +382,7 @@ def main():
     parser.add_argument('--ctype',type = str, default="mcl", help="you do not need to enter anything here")
     parser.add_argument('--orphanfile', type = str, help="name of file containing orphan links")
     args = parser.parse_args()
-    measurePrecRecall(args.clustfile, args.sp, args.ctype)
+    measurePrecRecall(args.clustfile, args.sp, args.ctype, args.orphanfile)
 
 
 if __name__ == "__main__":
