@@ -5,15 +5,16 @@ import logging
 
 logger = logging.getLogger("rapclust")
 
+import itertools
+import pandas as pd
+import numpy as np
+import os
+sep = os.path.sep
+
 
 def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writecomponents=False):
-    import itertools
-    import pandas as pd
-    import numpy as np
-    import os
 
 
-    sep = os.path.sep
     sffiles = [sep.join([sd, 'quant.sf']) for sd in sampdirs]
     eqfiles = [sep.join([sd, auxDir, '/eq_classes.txt']) for sd in sampdirs]
 
@@ -81,7 +82,8 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
 
     lens = quant.loc[tnames, 'Length'].values
 
-
+    weightDict = use_orphan_reads_simple(sampdirs, auxDir, '/orphan_links.txt', lens, tpm, ambigCounts, diagCounts,
+                                         cutoff, weightDict)
     minWeight = 0.5
     maxWeight = 0.0
     prior = 0.1
@@ -108,111 +110,8 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
     for e in edgesToRemove:
         del weightDict[e]
 
-    # Considering Orphan reads
-    def nearEnd(tup):
-        txp = tup[0]
-        pos = tup[1]
-        moverhang = 10
-        ml = 100
-        if pos < -moverhang or pos > lens[txp] + moverhang:
-            return False
-        elif pos <= ml or pos >= lens[txp] - ml:
-            return True
-        else:
-            return False
-
-    orphanLinkFiles = [sep.join([sd, auxDir, '/orphan_links.txt']) for sd in sampdirs]
-    haveLinkFiles = all(os.path.isfile(f) for f in orphanLinkFiles)
-    if haveLinkFiles:
-        numOrphanLinks = 0
-        for olfile in orphanLinkFiles:
-            for l in open(olfile):
-                left, right = l.rstrip().split(':')
-                lp = [map(int, i.split(',')) for i in left.rstrip('\t').split('\t')]
-                rp = [map(int, i.split(',')) for i in right.split('\t')]
-                lp = [t for t in filter(nearEnd, lp)]
-                rp = [t for t in filter(nearEnd, rp)]
-                #if len(lp) == 1 or len(rp) == 1:
-                for a, b in itertools.product(lp, rp):
-                    ltpm = tpm[a[0]] + 10 ** -11  # Laplacian Smoothing
-                    rtpm = tpm[b[0]] + 10 ** -11
-                    tpm_ratio = 1 - (abs(ltpm - rtpm) / (ltpm + rtpm))
-                    read_dist = lens[a[0]] - a[1] + b[1]
-                    if tpm_ratio >= .5: # and read_dist <= 300 and tpm[a[0]] > .5 and tpm[b[0]] > .5:
-                        a = a[0]; b = b[0]
-                        key = (a, b) if a < b else (b, a)
-                        if ambigCounts[a] < cutoff or ambigCounts[b] < cutoff:
-                            continue
-                        c0, c1 = diagCounts[a], diagCounts[b]
-                        a0, a1 = ambigCounts[a], ambigCounts[b]
-                        if key not in weightDict:
-                            numOrphanLinks += 1
-                            weightDict[key] = 1.0 / min(a0, a1)
-                        else:
-                            weightDict[key] += 1.0 / min(a0, a1)
-        logging.info("Added {} orphan link edges".format(numOrphanLinks))
-
-
-    # CNT_IDX =0; READ_DIST_IDX=1; TPM_RATIO_IDX=2
-    # consider_orphan_reads(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxDir, load_calculated_file=False)
-    #
-    # import sys
-    # cnt_min = sys.maxsize
-    # cnt_max = 0
-    # dist_min = sys.maxsize
-    # dist_max = 0
-    # tpm_min = 1
-    # tpm_max = 0
-    # for k, val in orphan_pair.iteritems():
-    #     cnt_min = min(val[CNT_IDX], cnt_min)
-    #     cnt_max = max(val[CNT_IDX], cnt_max)
-    #     dist_min = min(val[READ_DIST_IDX], dist_min)
-    #     dist_max = max(val[READ_DIST_IDX], dist_max)
-    #     tpm_min = min(val[TPM_RATIO_IDX], tpm_min)
-    #     tpm_max = max(val[TPM_RATIO_IDX], tpm_max)
-    #
-    # print("count: Min = {}, Max = {}".format(cnt_min, cnt_max))
-    # print("read dist: Min = {}, Max = {}".format(dist_min, dist_max))
-    # print("tpm: Min = {}, Max = {}".format(tpm_min, tpm_max))
-    # #points_cnt = len(cnt.keys())
-    #
-    # increased = 0
-    # added = 0
-    # min_score = 1
-    # max_score = 0
-    # score_cnt = 0
-    # score_sum = 0
-    # score_squared_sum = 0
-    # scores = []
-    # for k, val in orphan_pair.iteritems():
-    #     vals = [(val[CNT_IDX] - cnt_min+1) / (cnt_max - cnt_min+1), \
-    #             (1 - ((val[READ_DIST_IDX] - dist_min) / (dist_max - dist_min))), \
-    #             (val[TPM_RATIO_IDX] - tpm_min) / (tpm_max - tpm_min)
-    #             ]
-    #     vals = np.sort(vals)
-    #     score = vals[1]*vals[2]#*vals[0]
-    #     scores += [score]
-    #     score_cnt += 1
-    #     score_sum += score
-    #     score_squared_sum += score**2
-    #     min_score = score if score < min_score else min_score
-    #     max_score = score if score > max_score else max_score
-    #     if score >= 0.7:
-    #         if k in weightDict:
-    #             weightDict[k] += score
-    #             increased += 1
-    #         else:
-    #             weightDict[k] = score
-    #             added += 1
-    # score_mean = score_sum/score_cnt
-    # score_std = (score_squared_sum/score_cnt - score_mean**2)**0.5
-    # print ("Score: Min = {} , Max = {}, Mean = {}, STD = {}".format(min_score, max_score, score_mean, score_std))
-    # print ("Links: Added = {} , Value Increased = {} ".format(added, increased))
-    # #from matplotlib import pyplot as plt
-    # #plt.hist(scores, bins = 200)
-    # #plt.show()
-    # #End of Orphan read section
-
+    # optimally possible
+    #weightDict = optimal_prec_filter(weightDict, tnames)
 
     tnamesFilt = []
     relabel = {}
@@ -401,8 +300,113 @@ def filterGraph(expDict, netfile, ofile, auxDir):
     logging.info("Trimmed {} edges".format(numTrimmed))
 
 
+def use_orphan_reads_simple(sampdirs, auxDir, orphanFileName, lens, tpm, ambigCounts, diagCounts, cutoff, weightDict):
+    # Considering Orphan reads
+    def nearEnd(tup):
+        txp = tup[0]
+        pos = tup[1]
+        moverhang = 10
+        ml = 100
+        if pos < -moverhang or pos > lens[txp] + moverhang:
+            return False
+        elif pos <= ml or pos >= lens[txp] - ml:
+            return True
+        else:
+            return False
 
-def consider_orphan_reads(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxDir, load_calculated_file = True):
+    orphanLinkFiles = [sep.join([sd, auxDir, orphanFileName]) for sd in sampdirs]
+    haveLinkFiles = all(os.path.isfile(f) for f in orphanLinkFiles)
+    if haveLinkFiles:
+        numOrphanLinks = 0
+        for olfile in orphanLinkFiles:
+            for l in open(olfile):
+                left, right = l.rstrip().split(':')
+                lp = [map(int, i.split(',')) for i in left.rstrip('\t').split('\t')]
+                rp = [map(int, i.split(',')) for i in right.split('\t')]
+                lp = [t for t in filter(nearEnd, lp)]
+                rp = [t for t in filter(nearEnd, rp)]
+                #if len(lp) == 1 or len(rp) == 1:
+                for a, b in itertools.product(lp, rp):
+                    ltpm = tpm[a[0]] + 10 ** -11  # Laplacian Smoothing
+                    rtpm = tpm[b[0]] + 10 ** -11
+                    tpm_ratio = 1 - (abs(ltpm - rtpm) / (ltpm + rtpm))
+                    read_dist = lens[a[0]] - a[1] + b[1]
+                    if tpm_ratio >= .5: # and read_dist <= 300 and tpm[a[0]] > .5 and tpm[b[0]] > .5:
+                        a = a[0]; b = b[0]
+                        key = (a, b) if a < b else (b, a)
+                        if ambigCounts[a] < cutoff or ambigCounts[b] < cutoff:
+                            continue
+                        c0, c1 = diagCounts[a], diagCounts[b]
+                        a0, a1 = ambigCounts[a], ambigCounts[b]
+                        if key not in weightDict:
+                            numOrphanLinks += 1
+                            weightDict[key] = 1.0 / min(a0, a1)
+                        else:
+                            weightDict[key] += 1.0 / min(a0, a1)
+        logging.info("Added {} orphan link edges".format(numOrphanLinks))
+
+
+    # CNT_IDX =0; READ_DIST_IDX=1; TPM_RATIO_IDX=2
+    # use_orphan_reads_complicated(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxDir, load_calculated_file=False)
+    #
+    # import sys
+    # cnt_min = sys.maxsize
+    # cnt_max = 0
+    # dist_min = sys.maxsize
+    # dist_max = 0
+    # tpm_min = 1
+    # tpm_max = 0
+    # for k, val in orphan_pair.iteritems():
+    #     cnt_min = min(val[CNT_IDX], cnt_min)
+    #     cnt_max = max(val[CNT_IDX], cnt_max)
+    #     dist_min = min(val[READ_DIST_IDX], dist_min)
+    #     dist_max = max(val[READ_DIST_IDX], dist_max)
+    #     tpm_min = min(val[TPM_RATIO_IDX], tpm_min)
+    #     tpm_max = max(val[TPM_RATIO_IDX], tpm_max)
+    #
+    # print("count: Min = {}, Max = {}".format(cnt_min, cnt_max))
+    # print("read dist: Min = {}, Max = {}".format(dist_min, dist_max))
+    # print("tpm: Min = {}, Max = {}".format(tpm_min, tpm_max))
+    # #points_cnt = len(cnt.keys())
+    #
+    # increased = 0
+    # added = 0
+    # min_score = 1
+    # max_score = 0
+    # score_cnt = 0
+    # score_sum = 0
+    # score_squared_sum = 0
+    # scores = []
+    # for k, val in orphan_pair.iteritems():
+    #     vals = [(val[CNT_IDX] - cnt_min+1) / (cnt_max - cnt_min+1), \
+    #             (1 - ((val[READ_DIST_IDX] - dist_min) / (dist_max - dist_min))), \
+    #             (val[TPM_RATIO_IDX] - tpm_min) / (tpm_max - tpm_min)
+    #             ]
+    #     vals = np.sort(vals)
+    #     score = vals[1]*vals[2]#*vals[0]
+    #     scores += [score]
+    #     score_cnt += 1
+    #     score_sum += score
+    #     score_squared_sum += score**2
+    #     min_score = score if score < min_score else min_score
+    #     max_score = score if score > max_score else max_score
+    #     if score >= 0.7:
+    #         if k in weightDict:
+    #             weightDict[k] += score
+    #             increased += 1
+    #         else:
+    #             weightDict[k] = score
+    #             added += 1
+    # score_mean = score_sum/score_cnt
+    # score_std = (score_squared_sum/score_cnt - score_mean**2)**0.5
+    # print ("Score: Min = {} , Max = {}, Mean = {}, STD = {}".format(min_score, max_score, score_mean, score_std))
+    # print ("Links: Added = {} , Value Increased = {} ".format(added, increased))
+    # #from matplotlib import pyplot as plt
+    # #plt.hist(scores, bins = 200)
+    # #plt.show()
+    # #End of Orphan read section
+    return weightDict;
+def use_orphan_reads_complicated(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxDir, load_calculated_file = True):
     import itertools
     import numpy as np
     import os
@@ -530,3 +534,41 @@ def consider_orphan_reads(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxD
 
 
     return orphan_pair
+
+def optimal_prec_filter(weightDict, tnames):
+    ##
+    #  Go through the weightMap and remove any edges that
+    #  are between two paralogous contigs
+    ##
+    def readTrueLabels(fn):
+        ft = open(fn)
+        groundTruth_clust = {}
+        groundTruth_clust_inv = {}
+        gtClusterCount = {}
+        for line in ft:
+            tr_gn = map(str.strip, line[:-1].split("\t"))
+            groundTruth_clust[tr_gn[0]] = tr_gn[1]
+            if tr_gn[0] in gtClusterCount:
+                gtClusterCount[tr_gn[0]] += 1
+            else:
+                gtClusterCount[tr_gn[0]] = 1
+        for k, v in groundTruth_clust.iteritems():
+            if v in groundTruth_clust_inv:
+                groundTruth_clust_inv[v].append(k)
+            else:
+                groundTruth_clust_inv[v] = [k]
+        return groundTruth_clust, groundTruth_clust_inv
+
+    groundTruth_clust, ground_truth_clust_inv = readTrueLabels("../contigs2genes.disambiguous.txt")
+    edgesToRemove = []
+
+    for k,v in weightDict.iteritems():
+        if (tnames[k[0]] in groundTruth_clust and tnames[k[1]] in groundTruth_clust and
+                    groundTruth_clust[tnames[k[0]]] != groundTruth_clust[tnames[k[1]]]):
+            edgesToRemove.append(k)
+    # Actually delete those edges
+    for e in edgesToRemove:
+        del weightDict[e]
+
+    return weightDict
+
