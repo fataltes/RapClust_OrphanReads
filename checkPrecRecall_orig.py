@@ -338,7 +338,7 @@ def readCommClust(fn):
             tr_clust_inv[v] = [k]
     return tr_clust, tr_clust_inv
 
-def measurePrecRecall(qsf, sp, ctype, orphanfile):
+def measurePrecRecall(dir, qsf, sp, ctype, orphanfile):
     if ctype == "mcl":
         tr_clust, tr_clust_inv = readMCLClust(qsf)
     elif ctype == "corset":
@@ -355,7 +355,6 @@ def measurePrecRecall(qsf, sp, ctype, orphanfile):
     elif (sp == 'rice'):
         ft = trinity_rice
     groundTruth_clust, ground_truth_clust_inv = readTrueLabels(ft)
-    dir = "bin/human_rapclust"
     weightGraph = readNetFile("{}/mag.filt.net".format(dir))
     tp, fp, tn, fn, rprec, rrec = accuracyExpressedFast(groundTruth_clust, ground_truth_clust_inv,
                                                        tr_clust, tr_clust_inv)
@@ -374,15 +373,19 @@ def measurePrecRecall(qsf, sp, ctype, orphanfile):
     #plt.show()
 
 import argparse
+import os
 
 def main():
     parser = argparse.ArgumentParser(description="Give the SRR number")
+    parser.add_argument('--dir',type = str, help="graph file")
     parser.add_argument('--clustfile',type = str, help="graph file")
     parser.add_argument('--sp',type = str, help="type human")
     parser.add_argument('--ctype',type = str, default="mcl", help="you do not need to enter anything here")
     parser.add_argument('--orphanfile', type = str, help="name of file containing orphan links")
     args = parser.parse_args()
-    measurePrecRecall(args.clustfile, args.sp, args.ctype, args.orphanfile)
+    orphanfile = os.path.sep.join([args.dir, args.orphanfile])
+    clustfile =  os.path.sep.join([args.dir, args.clustfile])
+    measurePrecRecall(args.dir, clustfile, args.sp, args.ctype, orphanfile)
 
 
 if __name__ == "__main__":

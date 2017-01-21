@@ -73,18 +73,27 @@ def processQuant(config):
 
     # Filter the network
     filtNetFile = os.path.sep.join([outdir, "mag.filt.net"])
+    infoFiltNetFile = os.path.sep.join([outdir, "mag.filt.txt"])
 
     logging.info("Filtering multiple alignment graph")
     eqnet.filterGraph(conditionDict, netFile, filtNetFile, auxDir)
+
     # cluster the graph
     from subprocess import call
     clustFile = os.path.sep.join([outdir, "mag.clust"])
+    flatClustFile = os.path.sep.join([outdir, "mag.flat.clust"])
 
     logging.info("Clustering multiple alignment graph")
-    call(["mcl", filtNetFile, "--abc", "-o", clustFile])
 
-    flatClustFile = os.path.sep.join([outdir, "mag.flat.clust"])
+    # MCL clustering
+    call(["mcl", filtNetFile, "--abc", "-o", clustFile])
     eqnet.flattenClusters(clustFile, flatClustFile)
+
+    # Map Equation Clustering
+    # call(["Infomap", infoFiltNetFile, outdir,
+    #      "--clu", "--undirected", "--hard-partitions", "--out-name", "mag.flat.clust"])
+    # infomapClusFile = os.path.sep.join([outdir, "mag.flat.clust.clu"])
+    # eqnet.convert2clusterFormat(infomapClusFile, clustFile, flatClustFile)
 
     import numpy as np
     summaryFile = os.path.sep.join([outdir, "stats.json"])

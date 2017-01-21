@@ -11,6 +11,9 @@ import numpy as np
 import os
 sep = os.path.sep
 
+tnames_inv = {}
+tnames = []
+
 
 def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writecomponents=False):
 
@@ -18,7 +21,6 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
     sffiles = [sep.join([sd, 'quant.sf']) for sd in sampdirs]
     eqfiles = [sep.join([sd, auxDir, '/eq_classes.txt']) for sd in sampdirs]
 
-    tnames = []
     weightDict = {}
     diagCounts = None
     sumCounts = None
@@ -46,6 +48,8 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
                 for i in xrange(numTran):
                     ifile.readline()
 
+            for i in range(len(tnames)):
+                tnames_inv[tnames[i]]=i
             # for easy access to quantities of interest
             tpm = quant.loc[tnames, 'TPM'].values
             estCount = quant.loc[tnames, 'NumReads'].values
@@ -82,8 +86,6 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
 
     lens = quant.loc[tnames, 'Length'].values
 
-    weightDict = use_orphan_reads_simple(sampdirs, auxDir, '/orphan_links.txt', lens, tpm, ambigCounts, diagCounts,
-                                         cutoff, weightDict)
     minWeight = 0.5
     maxWeight = 0.0
     prior = 0.1
@@ -96,7 +98,7 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
     for k,v in weightDict.iteritems():
         c0, c1 = diagCounts[k[0]], diagCounts[k[1]]
         a0, a1 = ambigCounts[k[0]], ambigCounts[k[1]]
-        if a0 + a1 > epsilon and a0 > cutoff and a1 > cutoff:
+        if a0 + a1 > epsilon and a0 > cutoff and a1 > cutoff:# and v > 3:
             w = (v+prior) / min((a0+prior), (a1+prior))
             weightDict[k] = w
             if w > maxWeight:
@@ -110,8 +112,11 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
     for e in edgesToRemove:
         del weightDict[e]
 
+    # weightDict = use_orphan_reads_simple(sampdirs, auxDir, '/orphan_links.txt', lens, tpm, ambigCounts, diagCounts,
+    #                                      cutoff, weightDict)
+
     # optimally possible
-    #weightDict = optimal_prec_filter(weightDict, tnames)
+    #weightDict = optimal_prec_filter(weightDict, tnames, tpm, ambigCounts, diagCounts)
 
     tnamesFilt = []
     relabel = {}
@@ -264,7 +269,8 @@ def filterGraph(expDict, netfile, ofile, auxDir):
     logging.info("Done Reading")
     count = 0
     numTrimmed = 0
-    with open(netfile) as f, open(ofile, 'w') as ofile:
+    infomap_ofile = ofile.split('.net')[0] + '.txt'
+    with open(netfile) as f, open(ofile, 'w') as ofile, open(infomap_ofile, 'w') as infomap_ofile:
         data = pd.read_table(f, header=None)
         for i in tqdm(range(len(data))):
             count += 1
@@ -295,6 +301,7 @@ def filterGraph(expDict, netfile, ofile, auxDir):
             D = 2*(non_null-null)
             if D <= 20:
                 ofile.write("{}\t{}\t{}\n".format(x, y, data[2][i]))
+                infomap_ofile.write("{}\t{}\t{}\n".format(tnames_inv[x], tnames_inv[y], data[2][i]))
             else:
                 numTrimmed += 1
     logging.info("Trimmed {} edges".format(numTrimmed))
@@ -535,7 +542,7 @@ def use_orphan_reads_complicated(tnames, tpm, lens, sampdirs, orphanLink_out_fil
 
     return orphan_pair
 
-def optimal_prec_filter(weightDict, tnames):
+def optimal_prec_filter(weightDict, tnames, tpm, ambigCounts, diagCounts):
     ##
     #  Go through the weightMap and remove any edges that
     #  are between two paralogous contigs
@@ -567,8 +574,42 @@ def optimal_prec_filter(weightDict, tnames):
                     groundTruth_clust[tnames[k[0]]] != groundTruth_clust[tnames[k[1]]]):
             edgesToRemove.append(k)
     # Actually delete those edges
+    tpml = []
+    countl = []
+    commonReadl = []
     for e in edgesToRemove:
+        ltpm = tpm[e[0]] + 10**-12
+        rtpm = tpm[e[1]] + 10**-12
+        tpml += [1 - (abs(ltpm - rtpm) / (ltpm + rtpm))]
+        countl = [min(ambigCounts[e[0]], ambigCounts[e[1]])]
+        commonReadl = [weightDict[e]*min(ambigCounts[e[0]], ambigCounts[e[1]])]
+        print ("{}: {}, {}, {}".format(e, tpml[-1], countl[-1], commonReadl[-1]))
         del weightDict[e]
+    from matplotlib import pyplot as plt
+    f, ax = plt.subplots(3, 1)
+    ax[0].hist(tpml, bins=100)
+    ax[1].hist(countl, bins=100)
+    ax[2].hist(commonReadl, bins=100)
+
+    plt.show()
 
     return weightDict
 
+def convert2clusterFormat(infile, clustOutfile, flatClustOutfile):
+    clusts = {}
+    with open(infile) as ifile:
+        next(ifile); next(ifile)
+        for i,l in enumerate(ifile):
+            toks = l.rstrip().split()
+            if toks[1] not in clusts:
+                clusts[toks[1]] = []
+            clusts[toks[1]] += [tnames[int(toks[0])]]
+
+    with open(flatClustOutfile, 'w') as fofile, open(clustOutfile, 'w') as ofile:
+        for k, v in clusts.iteritems():
+            cname = "cluster{}".format(k)
+            new_cluster = ""
+            for member in v:
+                fofile.write("{}\t{}\n".format(cname, member))
+                new_cluster += "{}\t".format(member)
+            ofile.write("{}\n".format(new_cluster.strip()))
