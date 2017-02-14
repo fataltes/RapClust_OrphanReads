@@ -83,7 +83,7 @@ def doSparceCluster(rdim, cdim, sparceMat):
     for (i, j, d) in sparceMat:
         S[i, j] = d
     # perform clustering
-    labeler = MiniBatchKMeans(n_clusters=66000)
+    labeler = MiniBatchKMeans(n_clusters=66000, verbose=1)
     # convert lil to csr format
     # note: Kmeans currently only works with CSR type sparse matrix
     labeler.fit(S.tocoo())
