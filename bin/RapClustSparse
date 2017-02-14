@@ -9,7 +9,8 @@ import argparse
 import yaml
 import json
 
-from ..rapclust.sparseClust import *
+#from rapclust import sparseClust
+from rapclust import sparseClust_distMat as sparseClust
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
@@ -71,9 +72,12 @@ def processQuant(config):
     clustFile = os.path.sep.join([outdir, "mag.clust"])
     flatClustFile = os.path.sep.join([outdir, "mag.flat.clust"])
 
-    (numRows, numColumns, sparceMat) = sparseClust.readFiles(sampleDirs, auxDir)
-    labels = sparseClust.doSparceCluster(numRows, numColumns, sparceMat)
+    (numRows, numColumns, sparseMat) = sparseClust.readFiles(sampleDirs, auxDir)
+    #labels = sparseClust.doSparceCluster(numRows, numColumns, sparseMat)
+    (numTrans, sparseDist) = sparseClust.buildDistMat(sampleDirs, auxDir, sparseMat)
+    labels = sparseClust.doSparceCluster(numTrans, numTrans, sparseDist)
     sparseClust.convert2clusterFormat(labels, clustFile, flatClustFile)
+
 
     import numpy as np
     summaryFile = os.path.sep.join([outdir, "stats.json"])

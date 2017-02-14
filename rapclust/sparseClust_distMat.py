@@ -87,7 +87,7 @@ def calcDist(key, sparceDic):
             #dist += (t2Vec[col])**2 #Euclidean
     return dist
 
-def buildDistMat(sampdirs, auxDir, sparceDic):
+def buildDistMat(sampdirs, auxDir, sparseDic):
     eqfiles = [sep.join([sd, auxDir, '/eq_classes.txt']) for sd in sampdirs]
 
     distMat = {}
@@ -99,18 +99,18 @@ def buildDistMat(sampdirs, auxDir, sparceDic):
             numTran = int(ifile.readline().rstrip())
             numRows = max(numRows, numTran)
             numEq = int(ifile.readline().rstrip())
-            logging.info("quant file: {}; eq file: {}; # tran = {}; # eq = {}".format(sffile, eqfile, numTran, numEq))
+            logging.info("eq file: {}; # tran = {}; # eq = {}".format(eqfile, numTran, numEq))
             for i in range(numTran):
                 ifile.readline()
             for i in range(numEq):
                 toks = map(int, ifile.readline().rstrip().split('\t'))
                 tids = tuple(toks[1:-1])
                 for t1, t2 in itertools.combinations(tids,2):
-                    if t1 < t2:
+                    if t1 > t2:
                         t1, t2 = t2, t1
                     key = (t1, t2)
                     if key not in distMat:
-                        distMat[key] = calcDist(key, sparceDic)
+                        distMat[key] = calcDist(key, sparseDic)
     return numRows, distMat
 
 def doSparceCluster(rdim, cdim, distMat):
@@ -125,10 +125,10 @@ def doSparceCluster(rdim, cdim, distMat):
     for (i, j) in distMat:
         S[i, j] = distMat[(i, j)]
     # perform clustering
-    labeler = DBSCAN(metric='precomputed')#MiniBatchKMeans(n_clusters=66000)
+    labeler = DBSCAN(eps=500, min_samples=5, metric='precomputed', n_jobs=4)#MiniBatchKMeans(n_clusters=66000)
     # convert lil to csr format
     # note: Kmeans currently only works with CSR type sparse matrix
-    labeler.fit(S.tocoo())
+    labeler.fit(S.tocsr())
     return labeler.labels_
 
 def convert2clusterFormat(labels, clustOutfile, flatClustOutfile):
