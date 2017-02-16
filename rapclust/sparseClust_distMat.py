@@ -102,6 +102,7 @@ def buildDistMat(sampdirs, auxDir, sparseDic):
             logging.info("eq file: {}; # tran = {}; # eq = {}".format(eqfile, numTran, numEq))
             for i in range(numTran):
                 ifile.readline()
+                distMat[(i, i)] = 1e-4
             for i in range(numEq):
                 toks = map(int, ifile.readline().rstrip().split('\t'))
                 tids = tuple(toks[1:-1])
@@ -144,7 +145,7 @@ def doSparceCluster(rdim, cdim, distMat):
     # perform clustering
     #import pdb
     #pdb.set_trace()
-    sel_eps = 10
+    sel_eps = 10000
     labeler = DBSCAN(eps=sel_eps, min_samples=1, metric='precomputed')#MiniBatchKMeans(n_clusters=66000)
     # convert lil to csr format
     # note: Kmeans and DBSCAN currently only work with CSR type sparse matrix
