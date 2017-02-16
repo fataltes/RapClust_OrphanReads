@@ -16,7 +16,7 @@ from sklearn.cluster import DBSCAN
 tnames_inv = {}
 tnames = []
 
-def readFiles(sampdirs, auxDir):
+def readFiles(sampdirs, auxDir, cutoff=10.0):
     sffiles = [sep.join([sd, 'quant.sf']) for sd in sampdirs]
     eqfiles = [sep.join([sd, auxDir, '/eq_classes.txt']) for sd in sampdirs]
 
@@ -26,6 +26,7 @@ def readFiles(sampdirs, auxDir):
     totNumEq = 0
     totTpm = 0
     sparceDic = {}
+    weightDict = {}
     for sffile, eqfile in itertools.izip(sffiles, eqfiles):
         quant = pd.read_table(sffile)
         quant.set_index('Name', inplace=True)
@@ -40,6 +41,9 @@ def readFiles(sampdirs, auxDir):
                     tnames.append(ifile.readline().rstrip())
                 for i in range(len(tnames)):
                     tnames_inv[tnames[i]] = i
+                diagCounts = np.zeros(len(tnames))
+                sumCounts = np.zeros(len(tnames))
+                ambigCounts = np.zeros(len(tnames))
             else:
                 for i in range(numTran):
                     ifile.readline()
@@ -48,7 +52,7 @@ def readFiles(sampdirs, auxDir):
             tpm = quant.loc[tnames, 'TPM'].values
             totTpm += tpm
             estCount = quant.loc[tnames, 'NumReads'].values
-            efflens = quant.loc[tnames, 'EffectiveLength'].values
+            #efflens = quant.loc[tnames, 'EffectiveLength'].values
             epsilon =  np.finfo(float).eps
             sumCounts = np.maximum(sumCounts, estCount)
 
@@ -57,13 +61,58 @@ def readFiles(sampdirs, auxDir):
                 nt = toks[0]
                 tids = tuple(toks[1:-1])
                 count = toks[-1]
+
                 denom = sum([tpm[t] for t in tids])
+                for t1, t2 in itertools.combinations(tids, 2):
+                    w = count
+                    key = (t1, t2)
+                    if key in weightDict:
+                        weightDict[key] += w
+                    else:
+                        weightDict[key] = w
+
                 for t in tids:
                     if t not in sparceDic:
                         sparceDic[t] = {}
                     sparceDic[t][(totNumEq + i)] = count
+                    diagCounts[t] += count * (tpm[t] / denom)
+                    ambigCounts[t] += count
 
-                    #sparceMat.append((t, totNumEq + i, count * (tpm[t]/denom)))
+
+            minWeight = 0.5
+            maxWeight = 0.0
+            prior = 0.1
+            edgesToRemove = []
+
+            ##
+            #  Go through the weightMap and remove any edges that
+            #  have endpoints with too few mapping reads
+            ##
+            for k, v in weightDict.iteritems():
+                c0, c1 = diagCounts[k[0]], diagCounts[k[1]]
+                a0, a1 = ambigCounts[k[0]], ambigCounts[k[1]]
+                if a0 + a1 > epsilon and a0 > cutoff and a1 > cutoff:  # and v > 3:
+                    w = (v + prior) / min((a0 + prior), (a1 + prior))
+                    weightDict[k] = w
+                    if w > maxWeight:
+                        maxWeight = w
+                        # if w < minWeight:
+                        #    edgesToRemove.append(k)
+                else:
+                    edgesToRemove.append(k)
+
+            # Actually delete those edges
+            for e in edgesToRemove:
+                del weightDict[e]
+
+            tnamesFilt = []
+            relabel = {}
+            for i in range(len(estCount)):
+                if (diagCounts[i] > cutoff):
+                    relabel[i] = len(tnamesFilt)
+                    tnamesFilt.append(tnames[i])
+                    weightDict[(i, i)] = 1.1
+
             firstSamp = False
             totNumEq += numEq
     #for t in range(len(totTpm)):
@@ -71,7 +120,7 @@ def readFiles(sampdirs, auxDir):
 
     numColumns = totNumEq + 1
     numRows = numTran
-    return numRows, numColumns, sparceDic
+    return numRows, numColumns, sparceDic, weightDict
 
 def calcDist(key, sparceDic):
     dist = 0
@@ -87,31 +136,35 @@ def calcDist(key, sparceDic):
             #dist += (t2Vec[col])**2 #Euclidean
     return dist
 
-def buildDistMat(sampdirs, auxDir, sparseDic):
+def buildDistMat(sampdirs, auxDir, sparseDic, weightDic, distType):
     eqfiles = [sep.join([sd, auxDir, '/eq_classes.txt']) for sd in sampdirs]
 
     distMat = {}
     numSamp = 0
     numRows = 0
-    for eqfile in eqfiles:
-        with open(eqfile) as ifile:
-            numSamp += 1
-            numTran = int(ifile.readline().rstrip())
-            numRows = max(numRows, numTran)
-            numEq = int(ifile.readline().rstrip())
-            logging.info("eq file: {}; # tran = {}; # eq = {}".format(eqfile, numTran, numEq))
-            for i in range(numTran):
-                ifile.readline()
-                distMat[(i, i)] = 1e-4
-            for i in range(numEq):
-                toks = map(int, ifile.readline().rstrip().split('\t'))
-                tids = tuple(toks[1:-1])
-                for t1, t2 in itertools.combinations(tids,2):
-                    if t1 > t2:
-                        t1, t2 = t2, t1
-                    key = (t1, t2)
-                    if key not in distMat:
-                        distMat[key] = calcDist(key, sparseDic)
+    if distType == 'Jaccard':
+        for key in weightDic:
+            distMat[key] = 1.1 - weightDic[key] + 1e-4
+    else:
+        for eqfile in eqfiles:
+            with open(eqfile) as ifile:
+                numSamp += 1
+                numTran = int(ifile.readline().rstrip())
+                numRows = max(numRows, numTran)
+                numEq = int(ifile.readline().rstrip())
+                logging.info("eq file: {}; # tran = {}; # eq = {}".format(eqfile, numTran, numEq))
+                for i in range(numTran):
+                    ifile.readline()
+                    distMat[(i, i)] = 1e-4
+                for i in range(numEq):
+                    toks = map(int, ifile.readline().rstrip().split('\t'))
+                    tids = tuple(toks[1:-1])
+                    for t1, t2 in itertools.combinations(tids,2):
+                        if t1 > t2:
+                            t1, t2 = t2, t1
+                        key = (t1, t2)
+                        if key not in distMat:
+                            distMat[key] = calcDist(key, sparseDic)
     return numRows, distMat
 
 def doSparceCluster(rdim, cdim, distMat):
@@ -145,7 +198,7 @@ def doSparceCluster(rdim, cdim, distMat):
     # perform clustering
     #import pdb
     #pdb.set_trace()
-    sel_eps = 10000
+    sel_eps = 1.2
     labeler = DBSCAN(eps=sel_eps, min_samples=1, metric='precomputed')#MiniBatchKMeans(n_clusters=66000)
     # convert lil to csr format
     # note: Kmeans and DBSCAN currently only work with CSR type sparse matrix
