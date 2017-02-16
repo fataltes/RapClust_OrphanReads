@@ -65,7 +65,7 @@ def readFiles(sampdirs, auxDir):
 
                     #sparceMat.append((t, totNumEq + i, count * (tpm[t]/denom)))
             firstSamp = False
-        totNumEq += numEq
+            totNumEq += numEq
     #for t in range(len(totTpm)):
     #    sparceMat.append((t, totNumEq, totTpm[t])) # Add sum of all tpm values for each transcript as a single column
 
@@ -122,13 +122,35 @@ def doSparceCluster(rdim, cdim, distMat):
     S = lil_matrix((rdim, cdim))
 
     # add data to S
+    sumDist = 0
+    cntDist = 0
+    minDist = 10000000000
+    maxDist = 0
+    all_contigs = set(np.arange(0, rdim, 1))
+    existing_contigs = set()
     for (i, j) in distMat:
+        existing_contigs.add(i)
+        existing_contigs.add(j)
         S[i, j] = distMat[(i, j)]
+        S[j, i] = distMat[(i, j)]
+        sumDist += distMat[(i, j)]
+        cntDist += 1
+        if distMat[(i, j)]>maxDist:
+            maxDist = distMat[(i, j)]
+        if distMat[(i, j)]<minDist:
+            minDist = distMat[(i, j)]
+    print("AVERAGE OF DISTANCE ::: {}, MIN: {}, MAX: {}".format(sumDist/cntDist, minDist, maxDist))
+    print("# of unique contigs that aren't mentioned in distance matrix: {}".format(len(all_contigs-existing_contigs)))
     # perform clustering
-    labeler = DBSCAN(eps=500, min_samples=5, metric='precomputed', n_jobs=4)#MiniBatchKMeans(n_clusters=66000)
+    #import pdb
+    #pdb.set_trace()
+    sel_eps = 10
+    labeler = DBSCAN(eps=sel_eps, min_samples=1, metric='precomputed')#MiniBatchKMeans(n_clusters=66000)
     # convert lil to csr format
-    # note: Kmeans currently only works with CSR type sparse matrix
-    labeler.fit(S.tocsr())
+    # note: Kmeans and DBSCAN currently only work with CSR type sparse matrix
+    input_data = S.tocsr()
+    print("cases less than eps={}: {}".format(sel_eps, np.sum(input_data.data<=sel_eps)))
+    labeler.fit(input_data)
     return labeler.labels_
 
 def convert2clusterFormat(labels, clustOutfile, flatClustOutfile):
