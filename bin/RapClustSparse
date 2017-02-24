@@ -71,8 +71,12 @@ def processQuant(config):
 
     clustFile = os.path.sep.join([outdir, "mag.clust"])
     flatClustFile = os.path.sep.join([outdir, "mag.flat.clust"])
+    filtNetFile = os.path.sep.join([outdir, "mag.filt.net"])
 
     (numRows, numColumns, sparseDic, weightDic) = sparseClust.readFiles(sampleDirs, auxDir)
+    logging.info("Filtering multiple alignment graph")
+    weightDic = sparseClust.filterGraph(conditionDict, netFile, filtNetFile, auxDir, weightDic)
+
     #labels = sparseClust.doSparceCluster(numRows, numColumns, sparseMat)
     (numTrans, sparseDist) = sparseClust.buildDistMat(sampleDirs, auxDir, sparseDic, weightDic, distType='Jaccard')
     labels = sparseClust.doSparceCluster(numTrans, numTrans, sparseDist)
