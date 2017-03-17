@@ -99,8 +99,8 @@ def readFiles(sampdirs, auxDir, cutoff=10.0, loadPickle=False):
                     c0, c1 = diagCounts[k[0]], diagCounts[k[1]]
                     a0, a1 = ambigCounts[k[0]], ambigCounts[k[1]]
                     if a0 + a1 > epsilon and a0 > cutoff and a1 > cutoff:  # and v > 3:
-                        #w = (v + prior) / min((a0 + prior), (a1 + prior))
-                        w = (v + prior) / (a0 + a1 - v + prior)
+                        w = (v + prior) / min((a0 + prior), (a1 + prior))
+                        #w = (v + prior) / (a0 + a1 - v + prior)
                         weightDict[k] = w
                         if w > maxWeight:
                             maxWeight = w
@@ -115,10 +115,12 @@ def readFiles(sampdirs, auxDir, cutoff=10.0, loadPickle=False):
 
                 tnamesFilt = []
                 relabel = {}
+                validNodes = set()
                 for i in range(len(estCount)):
-                    if (diagCounts[i] > cutoff):
+                    if (ambigCounts[i] > cutoff):
                         relabel[i] = len(tnamesFilt)
                         tnamesFilt.append(tnames[i])
+                        validNodes.add(i)
                     weightDict[(i, i)] = 1.1
 
                 firstSamp = False
@@ -128,8 +130,9 @@ def readFiles(sampdirs, auxDir, cutoff=10.0, loadPickle=False):
 
         numColumns = totNumEq + 1
         numRows = numTran
-        #pickle.dump((numRows, numColumns, sparceDic, weightDict), open(distFile, 'wb'))        
-        return numRows, numColumns, sparceDic, weightDict
+        #pickle.dump((numRows, numColumns, sparceDic, weightDict), open(distFile, 'wb'))       
+        print("numRows:{}, numColumns:{}, numEdges:{}, validNodes:{}".format(numRows, numColumns, len(weightDict.keys()), len(validNodes))) 
+        return numRows, numColumns, sparceDic, weightDict, validNodes
 
 class EquivCollection(object):
     def __init__(self):
@@ -258,11 +261,20 @@ def filterGraph(expDict, netfile, ofile, auxDir, weightDict):
             #if D <= 20:
             #    ofile.write("{}\t{}\t{}\n".format(x, y, data[2][i]))
             if D > 20: #else:
-                edgesToRemove.append((tnames_inv[x], tnames_inv[y]))
+                #import pdb
+                #pdb.set_trace()
+                id1, id2 = tnames_inv[x], tnames_inv[y]
+                if id1 > id2:
+                    id1, id2 = id2, id1
+                edgesToRemove.append((id1, id2))
                 numTrimmed += 1
 
+    edgeRemoved = 0
     for e in edgesToRemove:
-        del weightDict[e]
+        if e in weightDict:
+            del weightDict[e]
+            edgeRemoved+=1
+    logging.info("To Be Removed: {}, Actually Removed: {}".format(len(edgesToRemove), edgeRemoved))
 
     logging.info("Trimmed {} edges".format(numTrimmed))
     return weightDict
@@ -287,6 +299,7 @@ def buildDistMat(sampdirs, auxDir, numRows, sparseDic, weightDic, distType):
     distMat = {}
     numSamp = 0
     numRows = numRows
+    
     if distType == 'Jaccard':
         for key in weightDic:
             distMat[key] = 1.1 - weightDic[key] + 1e-4
@@ -342,26 +355,68 @@ def doSparceCluster(rdim, cdim, distMat):
     print("# of unique contigs that aren't mentioned in distance matrix: {}".format(len(all_contigs-existing_contigs)))
     # convert lil to csr format
     # note: Kmeans and DBSCAN currently only work with CSR type sparse matrix
+    allLabels = [0]*rdim
     input_data = S.tocsr()
-    sel_eps = 1.09
+    sel_eps = .5
     print("cases less than eps={}: {}".format(sel_eps, np.sum(input_data.data<=sel_eps)))
     # perform clustering
-    labeler = DBSCAN(eps=sel_eps, min_samples=3, metric='precomputed')
-    #labeler = hdbscan.HDBSCAN(min_cluster_size=8, metric='precomputed', min_samples=1)
-    labeler.fit(input_data)
-    return labeler.labels_
+    # DBSCAN
+    #labeler = DBSCAN(eps=sel_eps, min_samples=3, metric='precomputed')
+    #labeler.fit(input_data)
+    #allLabels = labeler.labels_
 
-def convert2clusterFormat(labels, clustOutfile, flatClustOutfile):
+    # HDBSCAN
+    #import pdb
+    import networkx as nx
+    G = nx.from_scipy_sparse_matrix(input_data, create_using=nx.MultiGraph())
+    graphs = list(nx.connected_component_subgraphs(G))
+    lcntr = -2
+    gidx = 0
+    #for connComp in graphs:
+    #    for n in connComp.nodes():
+    #        allLabels[n] = lcntr
+    #    lcntr += 1
+    #zcntr = 0
+    #for i in allLabels:
+    #    if i == 0:
+    #        zcntr += 1
+    #print(zcntr)
+#        gidx += 1
+    
+    labeler = hdbscan.HDBSCAN(min_cluster_size=2, metric='precomputed', min_samples=1, eps=sel_eps)
+    for connComp in graphs:
+        gidx+=1
+        if connComp.number_of_nodes() > 500:
+            print("{}: {}, {}".format(gidx, connComp.number_of_nodes(), connComp.number_of_edges()))
+#           #pdb.set_trace()
+            subg = nx.to_scipy_sparse_matrix(connComp)
+            labeler.fit(subg)
+            for nidx in range(connComp.number_of_nodes()):
+                cur_lbl = gidx*10000 + labeler.labels_[nidx]
+                if labeler.labels_[nidx] == -1:
+                     cur_lbl = lcntr
+                     lcntr-=1
+                allLabels[connComp.nodes()[nidx]] = cur_lbl
+        else:
+            for n in connComp.nodes():
+                allLabels[n] = lcntr
+            lcntr-=1
+    return allLabels
+
+def convert2clusterFormat(labels, validNodes, clustOutfile, flatClustOutfile):
     clusts = {}
     curClustNum = -1
+    nodeCntr = 0
     for (row, label) in enumerate(labels):
-        if label == -1:
-            label = curClustNum
-            curClustNum-=1
-        if label not in clusts:
-            clusts[label] = []
-        clusts[label] += [tnames[row]]
-
+        if row in validNodes:
+            nodeCntr+=1
+            if label == -1:
+                label = curClustNum
+                curClustNum-=1
+            if label not in clusts:
+                clusts[label] = []
+            clusts[label] += [tnames[row]]
+    print("Total # of Nodes:{}".format(nodeCntr))
     with open(flatClustOutfile, 'w') as fofile, open(clustOutfile, 'w') as ofile:
         for k, v in clusts.iteritems():
             cname = "cluster{}".format(k)
