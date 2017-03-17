@@ -121,7 +121,7 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
     tnamesFilt = []
     relabel = {}
     for i in xrange(len(estCount)):
-        if (diagCounts[i] > cutoff):
+        if (ambigCounts[i] > cutoff):
             relabel[i] = len(tnamesFilt)
             tnamesFilt.append(tnames[i])
             weightDict[(i, i)] = 1.1
@@ -138,7 +138,7 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
             cc = nx.connected_component_subgraphs(G)
             for c in cc:
                 ofile.write('{}\n'.format('\t'.join(c.nodes())))
-
+    #print("#edges: {}".format(len(weightDict.keys())))
 def writeEdgeList(weightDict, tnames, ofile, G):
     useGraph = G is not None
     for k,v in weightDict.iteritems():
@@ -270,6 +270,10 @@ def filterGraph(expDict, netfile, ofile, auxDir):
     count = 0
     numTrimmed = 0
     infomap_ofile = ofile.split('.net')[0] + '.txt'
+    mlrmcl_ofile = ofile.split('.net')[0] + '.mlrmcl.graph'
+    mlrmcl = [[] for i in range(len(tnames_inv))]
+    numEdges = 0
+    #import pdb
     with open(netfile) as f, open(ofile, 'w') as ofile, open(infomap_ofile, 'w') as infomap_ofile:
         data = pd.read_table(f, header=None)
         for i in tqdm(range(len(data))):
@@ -302,8 +306,20 @@ def filterGraph(expDict, netfile, ofile, auxDir):
             if D <= 20:
                 ofile.write("{}\t{}\t{}\n".format(x, y, data[2][i]))
                 infomap_ofile.write("{}\t{}\t{}\n".format(tnames_inv[x], tnames_inv[y], data[2][i]))
+                #pdb.set_trace()
+                mlrmcl[tnames_inv[x]].append((tnames_inv[y], int(data[2][i]*1000)))
+                numEdges+=1
             else:
                 numTrimmed += 1
+    #import pdb
+    #pdb.set_trace()
+    with open(mlrmcl_ofile, 'w') as mlrmclf:
+        mlrmclf.write("{}\t{}\t1".format(len(tnames_inv), numEdges))
+        for i in range(len(mlrmcl)):
+            for vertex, weight in mlrmcl[i]:
+                if weight > 0:
+                    mlrmclf.write("{}\t{}\t".format(vertex+1, weight))
+            mlrmclf.write("{}\t1100\n".format(i+1)) #adding selfloops todo:check if you are already adding all selfloops to the graph! and then these might be excluded from the list of nodes in the graph
     logging.info("Trimmed {} edges".format(numTrimmed))
 
 
