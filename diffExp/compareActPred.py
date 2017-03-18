@@ -1,3 +1,24 @@
+def catchFalsehood(fn_gene1, fn_gene2):
+    tp1 = set()
+    cntr = 0
+    with open(fn_gene1) as fo:
+        for line in fo and cntr <= 10000:
+            cluster, tp, fp = line.strip().split()
+            for gene in tp.split():
+                tp1.add(gene)
+            cntr += 1
+    cntr = 0
+    tp2fp = {}
+    with open(fn_gene2) as fo:
+        for line in fo and cntr <= 10000:
+            cluster, tp, fp = line.strip().split()
+            if fp is not None:
+                for gene in fp.split():
+                    if gene in tp1:
+                        tp2fp[gene] = cluster
+    return tp2fp
+
+
 def compareActPred(fn_clust):
     clusts = ({}, {})
     contigs = ({}, {})
