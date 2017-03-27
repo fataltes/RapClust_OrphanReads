@@ -112,8 +112,8 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
     for e in edgesToRemove:
         del weightDict[e]
 
-    # weightDict = use_orphan_reads_simple(sampdirs, auxDir, '/orphan_links.txt', lens, tpm, ambigCounts, diagCounts,
-    #                                      cutoff, weightDict)
+    weightDict = use_orphan_reads_simple(sampdirs, auxDir, '/orphan_links.txt', lens, tpm, ambigCounts, diagCounts,
+                                         cutoff, weightDict)
 
     # optimally possible
     #weightDict = optimal_prec_filter(weightDict, tnames, tpm, ambigCounts, diagCounts)
@@ -337,10 +337,12 @@ def use_orphan_reads_simple(sampdirs, auxDir, orphanFileName, lens, tpm, ambigCo
         else:
             return False
 
+    seenOrphan = {}
+    orphanDict = {}
     orphanLinkFiles = [sep.join([sd, auxDir, orphanFileName]) for sd in sampdirs]
     haveLinkFiles = all(os.path.isfile(f) for f in orphanLinkFiles)
+    numOrphanLinks = 0
     if haveLinkFiles:
-        numOrphanLinks = 0
         for olfile in orphanLinkFiles:
             for l in open(olfile):
                 left, right = l.rstrip().split(':')
@@ -361,74 +363,26 @@ def use_orphan_reads_simple(sampdirs, auxDir, orphanFileName, lens, tpm, ambigCo
                             continue
                         c0, c1 = diagCounts[a], diagCounts[b]
                         a0, a1 = ambigCounts[a], ambigCounts[b]
-                        if key not in weightDict:
-                            numOrphanLinks += 1
-                            weightDict[key] = 1.0 / min(a0, a1)
+                        if a not in seenOrphan:
+                            seenOrphan[a] = set()
+                        if b not in seenOrphan:
+                            seenOrphan[b] = set()
+                        seenOrphan[a].add(b)
+                        seenOrphan[b].add(a)
+                        if key not in orphanDict:
+                            orphanDict[key] = 1.0 / min(a0, a1)
                         else:
-                            weightDict[key] += 1.0 / min(a0, a1)
+                            orphanDict[key] += 1.0 / min(a0, a1)
+    for key, value in orphanDict.iteritems():
+        if len(seenOrphan[key[0]]) < 3 and len(seenOrphan[key[1]]) < 3:
+            if key not in weightDict:
+                numOrphanLinks += 1
+                weightDict[key] = 1.0 / min(a0, a1)
+            else:
+                weightDict[key] += 1.0 / min(a0, a1)
         logging.info("Added {} orphan link edges".format(numOrphanLinks))
+    return weightDict
 
-
-    # CNT_IDX =0; READ_DIST_IDX=1; TPM_RATIO_IDX=2
-    # use_orphan_reads_complicated(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxDir, load_calculated_file=False)
-    #
-    # import sys
-    # cnt_min = sys.maxsize
-    # cnt_max = 0
-    # dist_min = sys.maxsize
-    # dist_max = 0
-    # tpm_min = 1
-    # tpm_max = 0
-    # for k, val in orphan_pair.iteritems():
-    #     cnt_min = min(val[CNT_IDX], cnt_min)
-    #     cnt_max = max(val[CNT_IDX], cnt_max)
-    #     dist_min = min(val[READ_DIST_IDX], dist_min)
-    #     dist_max = max(val[READ_DIST_IDX], dist_max)
-    #     tpm_min = min(val[TPM_RATIO_IDX], tpm_min)
-    #     tpm_max = max(val[TPM_RATIO_IDX], tpm_max)
-    #
-    # print("count: Min = {}, Max = {}".format(cnt_min, cnt_max))
-    # print("read dist: Min = {}, Max = {}".format(dist_min, dist_max))
-    # print("tpm: Min = {}, Max = {}".format(tpm_min, tpm_max))
-    # #points_cnt = len(cnt.keys())
-    #
-    # increased = 0
-    # added = 0
-    # min_score = 1
-    # max_score = 0
-    # score_cnt = 0
-    # score_sum = 0
-    # score_squared_sum = 0
-    # scores = []
-    # for k, val in orphan_pair.iteritems():
-    #     vals = [(val[CNT_IDX] - cnt_min+1) / (cnt_max - cnt_min+1), \
-    #             (1 - ((val[READ_DIST_IDX] - dist_min) / (dist_max - dist_min))), \
-    #             (val[TPM_RATIO_IDX] - tpm_min) / (tpm_max - tpm_min)
-    #             ]
-    #     vals = np.sort(vals)
-    #     score = vals[1]*vals[2]#*vals[0]
-    #     scores += [score]
-    #     score_cnt += 1
-    #     score_sum += score
-    #     score_squared_sum += score**2
-    #     min_score = score if score < min_score else min_score
-    #     max_score = score if score > max_score else max_score
-    #     if score >= 0.7:
-    #         if k in weightDict:
-    #             weightDict[k] += score
-    #             increased += 1
-    #         else:
-    #             weightDict[k] = score
-    #             added += 1
-    # score_mean = score_sum/score_cnt
-    # score_std = (score_squared_sum/score_cnt - score_mean**2)**0.5
-    # print ("Score: Min = {} , Max = {}, Mean = {}, STD = {}".format(min_score, max_score, score_mean, score_std))
-    # print ("Links: Added = {} , Value Increased = {} ".format(added, increased))
-    # #from matplotlib import pyplot as plt
-    # #plt.hist(scores, bins = 200)
-    # #plt.show()
-    # #End of Orphan read section
-    return weightDict;
 def use_orphan_reads_complicated(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxDir, load_calculated_file = True):
     import itertools
     import numpy as np
