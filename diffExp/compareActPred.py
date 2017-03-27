@@ -65,15 +65,18 @@ def calcStats(tp2fn, tn2fp, fn_clusts, fn_contGenMap):
     sizeDiff = {}
     purityDiff = {}
     contigCnt = {}
+    genDiff = {}
     falsehood = {'tn2fp':tn2fp, 'tp2fn':tp2fn}
+    problematics = set()
     for errType in ['tn2fp', 'tp2fn']:
-        cntDiff[errType] = {}; sizeDiff[errType] = {}; purityDiff[errType] = {}; contigCnt[errType] = {}
+        cntDiff[errType] = {}; sizeDiff[errType] = {}; purityDiff[errType] = {}; contigCnt[errType] = {}; genDiff[errType] = {}
         for gen in falsehood[errType]:
             clusSet = set()
             cntDiff[errType][gen] = [0, 0]
             sizeDiff[errType][gen] = [[], []]
             purityDiff[errType][gen] = [[], []]
-            contigCnt[errType][gen] = len(gen2cont[gen])
+            genDiff[errType][gen] = [set(), set()]
+            contigCnt[errType][gen] = len(gen2cont[gen])           
             for contig in gen2cont[gen]:
                 if contig in cont2clus[0]:
                     for i in [0, 1]:
@@ -83,14 +86,20 @@ def calcStats(tp2fn, tn2fp, fn_clusts, fn_contGenMap):
                             cntDiff[errType][gen][i] += 1
                             sizeDiff[errType][gen][i] += [len(clus2cont[i][clus])]
                             purityDiff[errType][gen][i] += [clusPurity[i][clus]]
-    return contigCnt, cntDiff, sizeDiff, purityDiff
+                            for cc in clus2cont[i][clus]:
+                                if cc in cont2gen:
+                                    genDiff[errType][gen][i].add(cont2gen[cc])
+                                else:
+                                    problematics.add(cc)
+    print(problematics)
+    return contigCnt, cntDiff, sizeDiff, purityDiff, genDiff
 
 import matplotlib
 matplotlib.use("Pdf")
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
-def drawPlots(contigCnt, cntDiff, sizeDiff, purityDiff):
+def saveAndPlot(contigCnt, cntDiff, sizeDiff, purityDiff, genDiff):
     import pdb
     for errType in ['tn2fp', 'tp2fn']:
         pp = PdfPages('plots/'+errType+'.pdf')
@@ -113,8 +122,16 @@ def drawPlots(contigCnt, cntDiff, sizeDiff, purityDiff):
         p1 = plt.figure(); plt.hist(orig, alpha=.5, label="orig"); plt.hist(orphan, alpha=.5, label="orphan"); plt.legend(loc='upper right'); plt.title('Avg clusters entropy'); pp.savefig(p1)
         p1 = plt.figure(); plt.hist(diff); plt.title('Avg clusters entropy difference (orphan-orig)'); pp.savefig(p1)
         pp.close()
-        
 
+        with open(errType + "_geneStats.txt", "wb") as outfile, open(errType + "_allgens.txt", "wb") as genfile:
+            outfile.write('%15s %10s %10s %15s %15s\n' % ("Gene", "#Contigs", "#Clus", "AvgClusSize", "AvgEntropy"))
+            for key in contigCnt[errType].keys():
+                cnt = cntDiff[errType][key][1]-cntDiff[errType][key][0]
+                size =  round(np.mean(sizeDiff[errType][key][1])-np.mean(sizeDiff[errType][key][0]), 3)
+                purity =  round(np.mean(purityDiff[errType][key][1])-np.mean(purityDiff[errType][key][0]), 3)
+                outfile.write('%15s %10s %10s %15s %15s\n' % (key, contigCnt[errType][key], cnt, size, purity))
+                genfile.write('{}:{}\t{}\n'.format(key, ','.join(genDiff[errType][key][0]), ','.join(genDiff[errType][key][1])))
+        
 
 import argparse
 if __name__ == "__main__":
@@ -132,5 +149,5 @@ if __name__ == "__main__":
     cont2gen_file = args.dirAddr + "genContMap.txt"
     tp2fn, tn2fp = catchFalsehood([gene1, gene2])
     print("tp2fn:{}, tn2fp:{}".format(len(tp2fn), len(tn2fp)))
-    contigCnt, cntDiff, sizeDiff, purityDiff = calcStats(tp2fn, tn2fp, clust_files, cont2gen_file)
-    drawPlots(contigCnt, cntDiff, sizeDiff, purityDiff)
+    contigCnt, cntDiff, sizeDiff, purityDiff, genDiff = calcStats(tp2fn, tn2fp, clust_files, cont2gen_file)
+    saveAndPlot(contigCnt, cntDiff, sizeDiff, purityDiff, genDiff)
