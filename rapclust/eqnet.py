@@ -112,9 +112,9 @@ def buildNetFile(sampdirs, netfile, orphanLink_out_file, cutoff, auxDir, writeco
     for e in edgesToRemove:
         del weightDict[e]
 
-    weightDict = use_orphan_reads_simple(sampdirs, auxDir, '/orphan_links.txt', lens, tpm, ambigCounts, diagCounts,
-                                         cutoff, weightDict)
-
+    #weightDict = use_orphan_reads_simple(sampdirs, auxDir, '/orphan_links.txt', lens, tpm, ambigCounts, diagCounts,
+    #                                     cutoff, weightDict)
+    weightDict = use_lapjv(sampdirs, auxDir, '/orphan_links.txt', lens, tpm, ambigCounts, diagCounts, cutoff, weightDict)
     # optimally possible
     #weightDict = optimal_prec_filter(weightDict, tnames, tpm, ambigCounts, diagCounts)
 
@@ -374,13 +374,57 @@ def use_orphan_reads_simple(sampdirs, auxDir, orphanFileName, lens, tpm, ambigCo
                         else:
                             orphanDict[key] += 1.0 / min(a0, a1)
     for key, value in orphanDict.iteritems():
-        if len(seenOrphan[key[0]]) < 3 and len(seenOrphan[key[1]]) < 3:
+        if len(seenOrphan[key[0]]) < 6 and len(seenOrphan[key[1]]) < 6:
             if key not in weightDict:
                 numOrphanLinks += 1
                 weightDict[key] = 1.0 / min(a0, a1)
             else:
                 weightDict[key] += 1.0 / min(a0, a1)
         logging.info("Added {} orphan link edges".format(numOrphanLinks))
+    return weightDict
+
+from lapjv import lapjv
+def use_lapjv(sampdirs, auxDir, orphanFileName, lens, tpm, ambigCounts, diagCounts, cutoff, weightDict):
+    seenOrphan = {}
+    orphanDict = {}
+    orphanLinkFiles = [sep.join([sd, auxDir, orphanFileName]) for sd in sampdirs]
+    haveLinkFiles = all(os.path.isfile(f) for f in orphanLinkFiles)
+    numOrphanLinks = 0
+    costM = np.zeros(shape=(len(tpm), len(tpm)))
+    if haveLinkFiles:
+        for olfile in orphanLinkFiles:
+            for l in open(olfile):
+                left, right = l.rstrip().split(':')
+                lp = [map(int, i.split(',')) for i in left.rstrip('\t').split('\t')]
+                rp = [map(int, i.split(',')) for i in right.split('\t')]
+                #lp = [t for t in filter(nearEnd, lp)]
+                #rp = [t for t in filter(nearEnd, rp)]
+                #if len(lp) == 1 or len(rp) == 1:
+                for a, b in itertools.product(lp, rp):
+                    ltpm = tpm[a[0]] + 10 ** -11  # Laplacian Smoothing
+                    rtpm = tpm[b[0]] + 10 ** -11
+                    a = a[0]; b = b[0]
+                    a0, a1 = ambigCounts[a], ambigCounts[b]
+                    costM[a, b] += -1.0 / min(a, b) # calculates min cost
+                    row_ind_lapjv, col_ind_lapjv, _ = lapjv(costM, verbose=True, force_doubles=True)
+                    # tpm_ratio = 1 - (abs(ltpm - rtpm) / (ltpm + rtpm))
+                    # if tpm_ratio >= .5: # and read_dist <= 300 and tpm[a[0]] > .5 and tpm[b[0]] > .5:
+                    #     a = a[0]; b = b[0]
+                    #     key = (a, b) if a < b else (b, a)
+                    #     if ambigCounts[a] < cutoff or ambigCounts[b] < cutoff:
+                    #         continue
+                    #     c0, c1 = diagCounts[a], diagCounts[b]
+                    #     a0, a1 = ambigCounts[a], ambigCounts[b]
+                    #     if a not in seenOrphan:
+                    #         seenOrphan[a] = set()
+                    #     if b not in seenOrphan:
+                    #         seenOrphan[b] = set()
+                    #     seenOrphan[a].add(b)
+                    #     seenOrphan[b].add(a)
+                    #     if key not in orphanDict:
+                    #         orphanDict[key] = 1.0 / min(a0, a1)
+                    #     else:
+                    #         orphanDict[key] += 1.0 / min(a0, a1)
     return weightDict
 
 def use_orphan_reads_complicated(tnames, tpm, lens, sampdirs, orphanLink_out_file, auxDir, load_calculated_file = True):
